@@ -1,0 +1,13 @@
+---
+title: Simulation examples
+author: Ilkka Kronholm
+---
+
+Here are some examples of doing simulations with the indsim package.
+
+```{r}
+test <- rnorm(10, mean = 0, sd = 1)
+test
+```
+
+

@@ -1,0 +1,6 @@
+man/*
+docs/*
+fig/*
+genarch.*
+*~
+.Rhistory

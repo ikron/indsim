@@ -1,0 +1,17 @@
+Package: indsim
+Title: Individual Based Simulations In R
+Version: 0.01
+Authors@R: person("Ilkka", "Kronholm", email = "ilkka.kronholm@jyu.fi",
+                  role = c("aut", "cre"))
+Description: This package implements individuals based simulations with explicit
+    genetic architecture.
+Depends:
+    R (>= 3.1.0)
+License: MIT
+LazyData: true
+Imports:
+    ggplot2,
+    cowplot,
+    dplyr,
+    reshape2
+RoxygenNote: 5.0.1
