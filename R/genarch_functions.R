@@ -37,13 +37,16 @@ initialise.ind.mat <- function(ind.mat, genotype.mat, N, nloc) {
 ##############################################################################################
 
 #Calculate genotypic effects
-calc.genot.effects <- function(ind.mat, ae, type) {
+calc.genot.effects <- function(ind.mat, ae, type, qtl.ind, nloc) {
     if(type == "biallelic") {
     geno.calc <- function(x, ae) {sum(rbind(x[1,]*ae, x[2,]*ae))} #This function sums genotypic effects
     ind.G <- as.vector(unlist(lapply(ind.mat, geno.calc, ae = ae)))
     }
 
     if(type == "infinite") {
+        #First put deleterious recessives to 0
+        my.replace <- function(x, qtl.ind, nloc) {x[1:2, !(1:nloc %in% qtl.ind)] <- 0; return(x)} #This function prevents spurious phenotypic effects
+        ind.mat <- lapply(ind.mat, my.replace, qtl.ind = qtl.ind, nloc = nloc)
         ind.G <- as.vector(unlist(lapply(ind.mat, sum)))
     }
     
@@ -103,7 +106,7 @@ produce.gametes <- function(sel.mat, loc.mat, N) {
 ###########################################################
 #Implement linkage into produce.gametes.W function, 
 #Production and random union of gametes, individuals contribute to the next generation weighted by their fitness
-    produce.gametes.W <- function(ind.mat, loc.mat, No, ind.W, link.map = F, linkage) {
+    produce.gametes.W <- function(ind.mat, loc.mat, No, ind.W, link.map = F, linkage, nloc.chr, n.chr) {
         
     Nind <- length(ind.mat)
     ind.mat.new <- rep(list("genotype" = loc.mat), No) #List of the next generation of individuals, initialize
@@ -173,7 +176,7 @@ produce.gametes <- function(sel.mat, loc.mat, N) {
 ###########################################################
 #This function produces gametes on individual basis, 
 #Production and random union of gametes, individuals contribute to the next generation weighted by their fitness
-    produce.gametes.W.No <- function(ind.mat, loc.mat, No, ind.W, link.map = F, linkage) {
+    produce.gametes.W.No <- function(ind.mat, loc.mat, No, ind.W, link.map = F, linkage, nloc.chr, n.chr) {
         
     Nind <- length(ind.mat) #Number of parents
     sum.No <- sum(No) #Total number of individuals to be produced
@@ -330,7 +333,7 @@ gen.mutations <- function(x, N, mu) {
     x <- rbinom(N, size = 1, prob = mu) }
 
 #This function makes mutations with the K-alleles model
-        mutate.K.alleles <- function(x, l) {
+        mutate.K.alleles <- function(x, l, alleles) {
             mut.al.ind <- sample(c(1,2),1)
             cur.allele <- x[mut.al.ind,l]
             new.allele <- sample(alleles[[l]][alleles[[l]] !=cur.allele],1) #Select one allele
@@ -350,15 +353,40 @@ mutate.inf.alleles <- function(x, l) {
 
 #Some additional functions
 #Calculate allele frequencies
-calc.al.freq <- function(data, N, nloc) {
+#For infinite allele model, frequencies of qtls are calculated such that ancestral allele (i.e. 0) is q
+calc.al.freq <- function(data, N, nloc, allele.model, loc.attributes) {
     
     allele.freq <- rep(0, nloc) #initialise allele frequencies
 
-    for(j in 1:nloc) {
-        allele1 <- unname(sapply(data, '[[', 2*j-1)) #Get element [1,2*j-1] from each individual
-        allele2 <- unname(sapply(data, '[[', 2*j)) #Get element [2,2*j] from each individual
-        
-        allele.freq[j] <- (sum(allele1+allele2))/(2*N)
+    #First the case of all biallelic calculation
+    if(allele.model == "biallelic") {
+
+        for(j in 1:nloc) {
+            allele1 <- unname(sapply(data, '[[', 2*j-1)) #Get element [1,2*j-1] from each individual
+            allele2 <- unname(sapply(data, '[[', 2*j)) #Get element [2,2*j] from each individual
+
+             allele.freq[j] <- (sum(allele1+allele2))/(2*N)
+        }
+    }
+
+    #Then in the case of infinite allele calculations
+    if(allele.model == "infinite") {
+            
+        for(j in 1:nloc) {
+            if(loc.attributes[j] != "qtl") { #Frequencies for deleterious recessives and neutral loci
+                allele1 <- unname(sapply(data, '[[', 2*j-1)) #Get element [1,2*j-1] from each individual
+                allele2 <- unname(sapply(data, '[[', 2*j)) #Get element [2,2*j] from each individual
+                
+                allele.freq[j] <- (sum(allele1+allele2))/(2*N)
+            } else {
+                allele1 <- unname(sapply(data, '[[', 2*j-1)) #Get element [1,2*j-1] from each individual
+                allele2 <- unname(sapply(data, '[[', 2*j)) #Get element [2,2*j] from each individual
+                allele1 <- allele1 != 0 #All other values (alleles) than 0 get a value of 1
+                allele2 <- allele2 != 0
+
+                allele.freq[j] <- (sum(allele1+allele2))/(2*N)
+            }
+        }
     }
     return(allele.freq)
 }
@@ -368,16 +396,226 @@ calc.al.freq <- function(data, N, nloc) {
     calc.fitness <- function(ind.P, opt.pheno, sel.intensity) {
         exp(-((ind.P-opt.pheno)^2)/(2*sel.intensity^2))
     }
+
+#Calculate fitness effects of deleterious mutations
+delres.fitness <- function(ind.mat, delres.ef, delres.ind, nloc) {
+    mydselect <- function(x, delres.ind, nloc) {x[1:2, (1:nloc %in% delres.ind)]}
+    ind.mat <- lapply(ind.mat, mydselect, delres.ind, nloc) #Select only deleterious recessives
+
+    #Need to define some helper function to look if both alleles contain deleterious recessive
+    delres.check <- function(ind.mat) {all(ind.mat == 1)}
+    delres.check2 <- function(ind.mat) { apply(ind.mat, MARGIN = 2, delres.check) }
+    delr.mat <- lapply(ind.mat, delres.check2) #Check all genotypes
+    delr.vec <- as.vector(unlist(lapply(delr.mat, sum)))
+    return((1-delres.ef)^delr.vec) #Calculate effects on fitness
+}
+ 
 #################################################################
 
 #The string #' indicates roxygen parsing
+
+#### Wrapper function for the whole simulation
+#' Perform individual based simulations
+#'
+#' This function performs individual based simulations according to given parameters
+#'
+#' @param N Starting population size
+#' @param generations Number of generations to run the simulations
+#' @param sel.intensity Selection intensity for stabilising selection
+#' @param init.f Initial allele frequencies for QTL
+#' @param init.n Initial allele frequencies for neutral loci
+#' @param sigma.e Environmental standard deviations of the phenotypic trait
+#' @param K Carrying capacity of the population
+#' @param opt.pheno Vector of phenotypic optimums for each generation
+#' @param density.reg How population density is regulated. Currently there are two possible values:  "logistic" which implements logistic population density regulation (see manual) and "sugar" which constrains population to carrying capacity by randomly removing individuals when population size is higher than K
+#' @param r If density regulation is "logistic", this is the population growth rate.
+#' @param B If density regulation is "sugar", this it the mean number of offspring each perfectly adapted individual has
+#' @param allele.model Which allele model to use for qtl. Currently the options are: "infinite" which uses an infinite alleles model for qtl, and "biallelic" which uses a biallelic model for qtl
+#' @param nqtl Number of loci affecting the phenotype
+#' @param mu Mutation rate, which currently is the same for all loci
+#' @param n.chr Number of chromosomes (linkage groups)
+#' @param nloc.chr Vector of the length of n.chr giving number of loci for each chromosome
+#' @param n.delres Number of deleterious recessives, defaults to 0
+#' @param delres.ef Effects of deleterious recessives on fitness (these are multiplicative), for example: setting this parameter to 0.1 means that fitness of an individuals that is homozygous for the allele is 1 - 0.1 = 0.9
+#' @param n.neutral Number of neutral loci, defaults to 0
+#' @param linkage.map If map distances are determined randomly, set this to "random", if fixed linkage map is provided can set this to "user"
+#' @param linkage Matrix of 3 rows and nloc columns, first two rows can be zeros and third row determines map distances relative to chromosome coordinates from 0 to 1
+#' @export
+indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, density.reg, allele.model, mu, n.chr, nloc.chr, nqtl, n.delres = 0, delres.ef = NULL, n.neutral = 0, linkage.map = "random", linkage = NULL) {
+
+    #Prepare linkage groups
+    foo <- list(0)
+    nloc <- nqtl + n.delres + n.neutral
+
+    #Perform some checks that initial parameters are sensible
+    if(nloc != sum(nloc.chr)) { stop("Number of loci and loci per chromosome don't match!") }
+
+    loc.attributes <- sample(c(rep("qtl", nqtl), rep("neutral", n.neutral), rep("delres", n.delres)), size = nloc, replace = FALSE) #Types for all loci
+    delres.ind <- (1:nloc)[loc.attributes == "delres"] #Indices of deleterious recessives
+    qtl.ind <- (1:nloc)[loc.attributes == "qtl"] #Indices of loci that affect the phenotype
+
+    alleles <- rep(list(c(0,1)), nloc) #Alleles for all except qtl
+    
+    if(allele.model == "biallelic") { #Setup biallelic effects
+        #alleles <- rep(list(c(0,1)), nloc) #All loci biallelic
+        q <- (1:(nqtl+1)/(nqtl+1))[-(nqtl+1)]
+        ae <- qnorm(q, mean = 0, sd = 1) #Allelic effects are distributed normally
+        #ae <- dnorm(seq(from = -5, to = -1, length.out = nloc), mean = 0, sd = 1)*10
+        ae <- sample(ae, length(ae)) #Randomize allelic effects among loci
+        temp <- rep(0,nloc)
+        temp[qtl.ind] <- ae
+        ae <- temp }
+
+    #Setup linkage map
+    if(linkage.map == "random") {
+        linkage <- rep(foo, n.chr)
+        for(i in 1:n.chr) {
+            linkage[[i]] <- matrix(rep(0,3*nloc.chr[i]), ncol = nloc.chr[i])
+            linkage[[i]][3,] <- sort(runif(nloc.chr[i])) #Map-positions for each locus
+        }
+    }
+
+    #Simulation with logistic population regulation and natural selection
+
+    #Initialize the results matrix
+    #We want to monitor phenotypes, allele freqs, heritabilities, variances etc. etc.
+    results.mat.pheno <- matrix(rep(0, generations*7), ncol = 7)
+    colnames(results.mat.pheno) <- c("generation", "pop.mean", "sel.mean", "var.a", "h2", "W.mean", "N")
+    results.mat.pheno[,1] <- 1:generations #Store generation numbers
+
+    results.mat.alleles <- matrix(rep(0, generations*(nloc+1)), ncol = nloc+1)
+    results.mat.alleles[,1] <- 1:generations
+    colnames(results.mat.alleles) <- c("generation", c(paste(rep("locus", nloc), 1:nloc, sep = "")))
+
+    #Initilize the simulation
+    loc.mat <- matrix(rep(0,2*nloc), ncol = nloc)
+    ind.mat <- rep(list("genotype" = loc.mat), N) #List for individuals
+
+    #Allele frequencies
+    init.freq <- rep(init.f,nloc) #for p
+    #Here can also make explicit initial frequencies for qtls, delres and neutral markers
+    if(n.neutral > 0) { init.freq[loc.attributes == "neutral"] <- init.n } #Neutral markers start at these frequencies
+
+    #Genotype frequencies
+    genotype.mat <- matrix(rep(0,3*nloc), ncol = nloc)
+    rownames(genotype.mat) <- c("AA", "Aa", "aa")
+
+    #Initialize genotype frequencies
+    for(i in 1:nloc) {
+        genotype.mat[,i] <- HW.genot.freq(init.freq[i])
+    }
+    #################################
+
+    ind.mat <- initialise.ind.mat(ind.mat, genotype.mat, N, nloc) #Sample starting genotypes
+
+
+    #Loop over generations
+    for(g in 1:generations) {
+
+        #Check for extinction
+        if(N < 2) {stop("Population went extinct! : (")}
+
+        #Calculate allele frequencies
+        results.mat.alleles[g,2:(nloc+1)] <- calc.al.freq(ind.mat, length(ind.mat), nloc, allele.model, loc.attributes)
+        
+
+        #Argument type needs to have value of either "biallelic" or "infinite"
+        ind.G <- calc.genot.effects(ind.mat, ae, type = allele.model, qtl.ind, nloc) #Calculate genotype effects
+        #sigma.e <- (abs(ind.G) + 1)*coef.e #Environmental variation scales with genotypic effects
+        
+        
+        #Calculate environmental and phenotypic effects
+        ind.E <- rnorm(n = N, mean = 0, sd = sigma.e)
+        ind.P <- ind.G + ind.E
+        ###############################################
+
+        #Store phenotypes    
+        results.mat.pheno[g,2] <- mean(ind.P) #Trait mean
+        results.mat.pheno[g,4] <- var(ind.G) #Additive genetic variance
+        results.mat.pheno[g,5] <- var(ind.G)/var(ind.P) #Heritability
+        
+        #Calculate fitnesses
+        ind.W <- calc.fitness(ind.P, opt.pheno[g], sel.intensity)
+        if(n.delres > 0) {
+            #Calculate fitness effects of deleterious recessives
+            ind.W <- ind.W*delres.fitness(ind.mat, delres.ef, delres.ind, nloc)
+        }
+        
+
+        results.mat.pheno[g,6] <- mean(ind.W) #Population mean fitness
+        results.mat.pheno[g,7] <- N #Population size
+        
+        ### Reproduction ###
+        #Using logistic density regulation
+        if(density.reg == "logistic") {
+            #Calculate the number of offspring the population produces
+            #Logistic population regulation
+            No <- round(N*K*(1+r) / (N*(1+r) - N + K)) #Logistic population growth
+            #Scale number of offspring by population mean fitness
+            No <- round(mean(ind.W)*No); if(No < 1) {stop("Population went extinct! : (")}
+            ind.mat <- produce.gametes.W(ind.mat, loc.mat, No, ind.W, link.map = T, linkage, nloc.chr, n.chr)
+        }
+
+        #Population regulation via Mikael's method
+        if(density.reg == "sugar") {
+            #Calculate the number of offspring that each individual produces
+            No <- rpois(n = N, lambda = B*ind.W)
+            #If number of offspring larger than K, remove some offspring randomly
+            if(sum(No) > K) {
+                while(sum(No) > K) { #Remove individuals until only K are left, seems slow...
+                    no.ind <- (1:length(No))[No > 0] #Indexes of cases where No > 0
+                    rem.ind <- sample(no.ind, 1)
+                    No[rem.ind] <- No[rem.ind] - 1
+                }
+            }
+            ind.mat <- produce.gametes.W.No(ind.mat, loc.mat, No, ind.W, link.map = T, linkage, nloc.chr, n.chr)
+        }
+        
+        #Next generation
+        N <- length(ind.mat) #Store new population size
+
+        ### Mutation ###
+        #Produce mutations
+        mutations <- rep(foo, nloc)
+        #Has to be 2*mu since mutations happen on individual basis and each ind has 2 copies
+        mutations <- lapply(mutations, gen.mutations, N = N, mu = 2*mu) 
+        for(l in 1:nloc) { #Loop over all loci
+            if(any(mutations[[l]] == 1) == TRUE) { #Did any mutations happen?
+                mut.ind <- ind.mat[mutations[[l]] == 1] #Select individuals to be mutated
+                if(allele.model == "biallelic") { #Which alleles model is used?
+                    mut.ind <- lapply(mut.ind, mutate.K.alleles, l = l, alleles = alleles) #Mutate alleles
+                }
+                if(allele.model == "infinite") {
+                    if(loc.attributes[l] == "qtl") {
+                        mut.ind <- lapply(mut.ind, mutate.inf.alleles, l = l) } else {
+                            mut.ind <- lapply(mut.ind, mutate.K.alleles, l = l, alleles = alleles) }
+                }
+                ind.mat[mutations[[l]] == 1] <- mut.ind #Store results
+            }
+        }
+    ########################    
+        
+        
+    } #Done looping over generations
+
+
+    #Modify results matrices if necessary
+
+    #Return results
+    return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes))
+}
+    
+
+##Need to do replicates simulations as well.
+
+    
 
 #This function plots an overview of the simulation results
 #' Plot simulation results
 #'
 #' This function plots population size, trait mean, and population mean fitness of the simulation
 #'
-#' @param data Result matrix given by a another function (link to be completed)
+#' @param data Phenotypic result matrix given by a another function (link to be completed)
 #' @export
 plot_sim.results <- function(data) {
 
@@ -402,13 +640,23 @@ plot_sim.results <- function(data) {
 }
 
 #This function plots an overview of allele frequency changes
-plot_allele.results <- function(data, nloc) {
+#' Plot allele frequency results
+#'
+#' This function plots allele frequencies over time simulation. Note that this only works in the biallelic allele model
+#'
+#' @param data Allele frequency result matrix given by another function (link to be added)
+#' @param nloc Number of loci in the simulation
+#' @param loc.attr Types for the different loci, output by indsim.simulate (link to be added)
+#' @export
+plot_allele.results <- function(data, nloc, loc.attr) {
 
     #First need to transform data into long format for ggplot
     data <- data.frame(data) #Need to convert to data frame before melt
     data.long <- reshape2::melt(data, id.vars = c("generation"), measure.vars = c(paste(rep("locus", nloc), 1:nloc, sep = "")), variable.name = "locus", value.name = "freq")
+    type.indices <- as.numeric(data.long$locus) #Since loci are in order this is OK
+    data.long$loctype <- loc.attr[type.indices]
 
-    ggplot2::ggplot(data.long, aes(x = generation, y = freq, group = locus)) +
+    ggplot2::ggplot(data.long, aes(x = generation, y = freq, group = locus, colour = loctype)) +
         ggplot2::geom_line() +
         ggplot2::xlab("Generation") +
         ggplot2::ylab("Allele frequency") +
@@ -418,7 +666,15 @@ plot_allele.results <- function(data, nloc) {
             
 #This function plots an overview of alleles present in the population
 #Only works for the infinite alleles model
-plot_inf.alleles <- function(data, nloc) {
+#' Plot allele effect distribution with the infinite alleles model
+#'
+#' This function plots the distribution of all allelic effects and their frequencies. Note that this only works in the infinite allele model
+#'
+#' @param data List of individual genotypes, produced by function (link to be addded)
+#' @param nloc Number of loci used in the simulation
+#' @param loc.attr Types for the different loci, output by indsim.simulate (link to be added)
+#' @export
+plot_inf.alleles <- function(data, nloc, loc.attr) {
 
     #First transforming the data
     #Select each locus and create a matrix of 2N alleles
@@ -433,10 +689,13 @@ plot_inf.alleles <- function(data, nloc) {
     colnames(allele.mat) <- c(paste(rep("locus", nloc), 1:nloc, sep = ""))
     #Reshape with melt()
     allele.long <- reshape2::melt(allele.mat, measure.vars = c(paste(rep("locus", nloc), 1:nloc, sep = "")), variable.name = "locus", value.name = "effect")
+    type.indices <- as.numeric(allele.long$locus) #Since loci are in order this is OK
+    allele.long$loctype <- loc.attr[type.indices]
+    allele.long <- allele.long[allele.long$loctype == "qtl",] #Drop all loci that are not qtls
     
     #Plot with ggplot2
     ggplot2::ggplot(allele.long, aes(x = effect)) +
-      ggplot2::geom_histogram(aes(y = (..ncount..)), colour = "black", fill = "white", binwidth = 0.1) +
+      ggplot2::geom_histogram(aes(y = ..count../(2*N)), colour = "black", fill = "white", binwidth = 0.1) +
       ggplot2::geom_vline(aes(xintercept =0), linetype = "dashed") +
       ggplot2::xlab("Allelic effect") +
       ggplot2::ylab("Allele frequency") +
@@ -445,7 +704,8 @@ plot_inf.alleles <- function(data, nloc) {
     
 }
 
-    
+
+
 ################################################################
 
 ###########################################################
@@ -455,6 +715,15 @@ plot_inf.alleles <- function(data, nloc) {
 ### Autoregressive (AR) process ###
 #E_{t+1} = kappa*E_t + omega_t*sqrt(1-kappa^2)
 #When kappa < 0 -> blue noise, kappa > 0 -> red noise, and kappa = 0 -> white noise
+#' Generate coloured noise using autoregressive process
+#'
+#' This function generates coloured noise for generating environmental variation. Noise is generated using the equation E_{t+1} = kappa \times E_t + omega_t \times sqrt{1-kappa^2}
+#'
+#' @param kappa When kappa < 0, blue noise is generated, when kappa > 0 function generates red noise and when kappa = 0 white noise is generated
+#' @param mean Mean of the environment
+#' @param sd Standard deviation
+#' @param generations How many generations (time steps) to generate noise
+#' @export
 coloured.noise <- function(kappa = 0, mean = 0, sd = 1, generations = 100) {
     E <- rep(0, generations) #Initialize the environmental variable
     E[1] <- rnorm(1, mean = mean, sd = sd) #Initialize first step
