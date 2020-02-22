@@ -392,6 +392,27 @@ calc.al.freq <- function(data, N, nloc, allele.model, loc.attributes) {
 }
 ########################################################################################
 
+#########################################################
+#Calculate effective population size from neutral markers
+#Assumes that generations are sampled t generations apart
+calc.Ne <- function(af1, af2, N1, N2, nloc, t) {
+    ##Using the method of Nei and Tajima 1981 (methoc C: eqs 15 and 16)
+    Fc <- rep(0, nloc)
+    #Calculating Fc (equation 15) (A measure of inbreeding F-statistics)
+    for(i in 1:nloc) {
+        Fc[i] <- (1/2) * ((af1[i] - af2[i])^2 / ( (af1[i]+af2[i])/2 - af1[i]*af2[i]) + ((1-af1[i]) - (1-af2[i]))^2 / ( ((1-af1[i]) + (1-af2[i]) )/2 - (1-af1[i])*(1-af2[i]) ))
+    }
+    #Mean Fc across all loci (since loci are biallelic no weighting is done for number of alleles)
+    meanFc <- sum(Fc)/nloc
+    #Estimate of Ne (equation 16)
+    Ne <- (t-2) / (2*(meanFc - (1/(2*N1) + 1/(2*N2))))
+    return(Ne)
+}
+
+
+#########################################################
+
+
 #Calculate fitness using stabilizing selection 
     calc.fitness <- function(ind.P, opt.pheno, sel.intensity) {
         exp(-((ind.P-opt.pheno)^2)/(2*sel.intensity^2))
@@ -486,6 +507,10 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
     results.mat.alleles <- matrix(rep(0, generations*(nloc+1)), ncol = nloc+1)
     results.mat.alleles[,1] <- 1:generations
     colnames(results.mat.alleles) <- c("generation", c(paste(rep("locus", nloc), 1:nloc, sep = "")))
+    #If there are neutral loci in the simulation add Ne column to calculate variance effective size
+    if(n.neutral > 0) { results.mat.alleles <- cbind(results.mat.alleles, c(rep(NA,10), rep(0, generations-10)))
+                        colnames(results.mat.alleles)[nloc+2] <- "Ne"
+                        neutral.index <- (1:nloc)[loc.attributes == "neutral"] + 1 }
 
     #Initilize the simulation
     loc.mat <- matrix(rep(0,2*nloc), ncol = nloc)
@@ -517,6 +542,7 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
 
         #Calculate allele frequencies
         results.mat.alleles[g,2:(nloc+1)] <- calc.al.freq(ind.mat, length(ind.mat), nloc, allele.model, loc.attributes)
+
         
 
         #Argument type needs to have value of either "biallelic" or "infinite"
@@ -544,6 +570,9 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
 
         results.mat.pheno[g,6] <- mean(ind.W) #Population mean fitness
         results.mat.pheno[g,7] <- N #Population size
+
+        #Calculate effective population size (if g > 10)
+        if(g > 10) { results.mat.alleles[g,(nloc+2)] <- calc.Ne(af1 = results.mat.alleles[(g-10), neutral.index], af2 = results.mat.alleles[g, neutral.index], N1 = results.mat.pheno[g-10,7], N2 = results.mat.pheno[g,7], nloc = n.neutral, t = 10) }
         
         ### Reproduction ###
         #Using logistic density regulation
