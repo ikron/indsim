@@ -394,7 +394,7 @@ calc.al.freq <- function(data, N, nloc, allele.model, loc.attributes) {
     if(allele.model == "infinite") {
             
         for(j in 1:nloc) {
-            if(loc.attributes[j] %in% c("qtl", "qtl.slope") == FALSE) { #Frequencies for deleterious recessives and neutral loci
+            if(loc.attributes[j] %in% c("qtl", "qtl.slope", "qtl.adj", "qtl.hed") == FALSE) { #Frequencies for deleterious recessives and neutral loci
                 allele1 <- unname(sapply(data, '[[', 2*j-1)) #Get element [1,2*j-1] from each individual
                 allele2 <- unname(sapply(data, '[[', 2*j)) #Get element [2,2*j] from each individual
                 
@@ -952,7 +952,8 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
         #Loop over the rest life stages (phenotypic adjustment can happen)
         for(j in 2:L) {
             ind.adjustment <- rbinom(n = N, size = 1, prob = ind.Gadj) #Did adjustment happen
-            ind.P <- ind.P + ind.Gb*cues[j + L*(g-1)]*ind.adjustment
+            new.P <- ind.Ga + ind.Gb*cues[j + L*(g-1)] + ind.E #Calculate new phenotypes
+            ind.P[ind.adjustment == 1] <- new.P[ind.adjustment == 1] #Adjust phenotypes
             ind.M[,j] <- abs(E[j + L*(g-1)] - ind.P) #Calculate second mismatch
             ind.costs <- ind.costs + ifelse(ind.Gb > 0, ka*ind.adjustment, 0) #Calculate costs
         }
@@ -1106,7 +1107,7 @@ plot_allele.results <- function(data, nloc, loc.attr) {
 #' @param nloc Number of loci used in the simulation
 #' @param loc.attr Types for the different loci, output by indsim.simulate (link to be added)
 #' @export
-plot_inf.alleles <- function(data, nloc, loc.attr) {
+plot_inf.alleles <- function(data, nloc, loc.attr, plasticity = FALSE) {
 
     #First transforming the data
     #Select each locus and create a matrix of 2N alleles
@@ -1123,6 +1124,7 @@ plot_inf.alleles <- function(data, nloc, loc.attr) {
     allele.long <- reshape2::melt(allele.mat, measure.vars = c(paste(rep("locus", nloc), 1:nloc, sep = "")), variable.name = "locus", value.name = "effect")
     type.indices <- as.numeric(allele.long$locus) #Since loci are in order this is OK
     allele.long$loctype <- loc.attr[type.indices]
+    if(plasticity == FALSE) {
     allele.long <- allele.long[allele.long$loctype == "qtl",] #Drop all loci that are not qtls
     
     #Plot with ggplot2
@@ -1132,11 +1134,51 @@ plot_inf.alleles <- function(data, nloc, loc.attr) {
       ggplot2::xlab("Allelic effect") +
       ggplot2::ylab("Allele frequency") +
       ggplot2::scale_y_continuous(limits = c(0,1), expand = c(0,0)) +
-      ggplot2::facet_wrap(~ locus)
+      ggplot2::facet_wrap(~ locus) }
+    ##Plot when plasticity is used
+    if(plasticity == TRUE) {
+        allele.long <- allele.long[allele.long$loctype == "qtl" | allele.long$loctype == "qtl.slope" | allele.long$loctype == "qtl.adj" | allele.long$loctype == "qtl.hed",]
+
+        #ggplot2
+        ggplot2::ggplot(allele.long, aes(x = effect)) +
+            ggplot2::geom_histogram(aes(y = ..count../(2*N)), colour = "black", fill = "white", binwidth = 0.1) +
+            ggplot2::geom_vline(aes(xintercept =0), linetype = "dashed") +
+            ggplot2::xlab("Allelic effect") +
+            ggplot2::ylab("Allele frequency") +
+            ggplot2::scale_y_continuous(limits = c(0,1), expand = c(0,0)) +
+            ggplot2::facet_wrap(loctype ~ locus) }    
     
 }
 
-
+##This function plots the mean reaction norm of the population
+##Only works with the plasticity model
+#'Plot mean reaction norm of the population in the final generation
+#'
+#' Line colour is determined by type of plasticity. Red is reversible plasticity, Blue is irreversable plasticity, green is bet-hedging
+#' 
+#' @param data genotypic values of intercepts and slopes etc.
+#' @export
+plot_reaction.norm <- function(data) {
+    finalgen <- nrow(data)
+    data <- as.data.frame(data)
+    a <- data$G.int[finalgen]
+    b <- data$G.slope[finalgen]
+    cue <- seq(-1, 1, by = 0.1)
+    phenotype <- a + b*(cue)
+    ctype <- "black"
+    if(b > 0.1) {
+        if(data$G.adj[finalgen] > 0.1) { ctype <- "red" } else { ctype <- "blue" }
+    }
+    if(data$G.hed[finalgen] > 0.1) { cytpe <- "green" }
+    
+    plotdata <- data.frame(cue = cue, phenotype = phenotype)
+    
+    ggplot2::ggplot(plotdata, aes(x = cue, y = phenotype)) +
+        ggplot2::geom_line(color = ctype) +
+        ggplot2::coord_cartesian(ylim = c(-1,1)) +
+        ggplot2::xlab("Environmental cue") +
+        ggplot2::ylab("Phenotype")    
+}
 
 ################################################################
 
