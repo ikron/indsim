@@ -47,7 +47,7 @@ calc.genot.effects <- function(ind.mat, ae, type, qtl.ind, nloc) {
         #First put deleterious recessives to 0
         my.replace <- function(x, qtl.ind, nloc) {x[1:2, !(1:nloc %in% qtl.ind)] <- 0; return(x)} #This function prevents spurious phenotypic effects
         ind.mat <- lapply(ind.mat, my.replace, qtl.ind = qtl.ind, nloc = nloc)
-        ind.G <- as.vector(unlist(lapply(ind.mat, sum)))
+        ind.G <- as.vector(unlist(lapply(lapply(ind.mat, Re), sum)))
     }
     
     return(ind.G)
@@ -64,7 +64,7 @@ calc.genot.effects.lim <- function(ind.mat, ae, type, qtl.ind, nloc, limits) {
         #First put deleterious recessives to 0
         my.replace <- function(x, qtl.ind, nloc) {x[1:2, !(1:nloc %in% qtl.ind)] <- 0; return(x)} #This function prevents spurious phenotypic effects
         ind.mat <- lapply(ind.mat, my.replace, qtl.ind = qtl.ind, nloc = nloc)
-        ind.G <- as.vector(unlist(lapply(ind.mat, sum)))
+        ind.G <- as.vector(unlist(lapply(lapply(ind.mat, Re), sum)))
     }
 
 #Set too large or small genotypic values to their limits
@@ -74,15 +74,48 @@ calc.genot.effects.lim <- function(ind.mat, ae, type, qtl.ind, nloc, limits) {
     return(ind.G)
 }
 
+#This function calculates effects of epigenetically modified loci
+#Does not work at the moment if allelic architecture is biallelic for qtl
+calc.genot.effects.epi <- function(ind.mat, qtl.ind, nloc) {
+    #Check which loci are epigenetically modified
 
-#Calculate genotypic effects, old function
-#calc.genot.effects <- function(ind.mat, N, a) {
-#    ind.G <- rep(0,N) #init
-#    for(i in 1:N) {
-#    ind.G[i] <- sum(ind.mat[[i]]*a) #Sum genotypic effects, assuming that all loci have the same allelic effects, for now
-#    }
-#    return(ind.G)
-#}
+    
+    #Set all other values first to 0 to avoid spurious effects
+    my.replace <- function(x, qtl.ind, nloc) {x[1:2, !(1:nloc %in% qtl.ind)] <- 0; return(x)}
+    ind.mat <- lapply(ind.mat, my.replace, qtl.ind = qtl.ind, nloc = nloc)
+    
+    #Calculate epigenetic effects for all inds
+    ind.epi <- lapply(ind.mat, Im)
+    if(any(unlist(ind.epi) != 0)) {
+        epi.cue <- unlist(ind.epi)[which(unlist(ind.epi) != 0)[1]] } else { epi.cue <- 0 }
+    #Epigenetic effect is the slope effect of epigenetically modified slope loci * previous parental cue
+    epi.check <- lapply(ind.epi, function(x) {x > 0})
+    reals <- lapply(ind.mat, Re)
+    ind.Gb <- mapply('*', reals, epi.check, SIMPLIFY = FALSE) #
+    #Calculate slope effects for all inds
+    ind.Gb <- as.vector(unlist(lapply(ind.Gb, sum))) #Calculate slopes
+    ind.Gepimod <- ind.Gb*epi.cue
+    return(ind.Gepimod)
+}
+
+#This functions resets all epigenetic modifications
+reset.epigenetics <- function(ind.mat) {
+    ind.mat <- lapply(ind.mat, Re)
+    return(ind.mat)
+}
+
+##This function inserts epigenetic modifications to certain loci
+        epigenetic.modification <- function(ind.mat, qtl.ind, cue, ind.Gepi) {
+            modify <- function(x, loc, cue) { x[,loc] <- x[,loc] + cue*1i; return(x) }
+            N.ind <- length(ind.Gepi)
+            epi.mod.ind <- rbinom(n = N.ind, size = 1, prob = ind.Gepi) #Does epigenetic mod happen?
+            select.inds <- ind.mat[as.logical(epi.mod.ind)] #
+            select.inds <- lapply(select.inds, modify, qtl.ind, cue) #Epigenetically modify the qtl.slope loci
+            ind.mat[as.logical(epi.mod.ind)] <- select.inds
+            return(ind.mat)           
+        }
+
+
 ##########################################################
 
 
@@ -326,7 +359,7 @@ resolve.crossovers <- function(meiocyte, xo.positions.list, xo.strands.list, str
             cur.strands <- xo.strands.list[[i]][j]
             sel.strands <- meiocyte[[i]][strand.mat[,cur.strands],] #Select strands
             #Crossover indices
-            before.xo <- meiocyte[[i]][5,] < cur.pos
+            before.xo <- Re(meiocyte[[i]][5,]) < cur.pos
             after.xo <- !before.xo
             #Resolve crossover
             meiocyte[[i]][(strand.mat[,cur.strands][1]),] <- c(sel.strands[1,before.xo], sel.strands[2,after.xo])
@@ -394,7 +427,7 @@ calc.al.freq <- function(data, N, nloc, allele.model, loc.attributes) {
     if(allele.model == "infinite") {
             
         for(j in 1:nloc) {
-            if(loc.attributes[j] %in% c("qtl", "qtl.slope", "qtl.adj", "qtl.hed") == FALSE) { #Frequencies for deleterious recessives and neutral loci
+            if(loc.attributes[j] %in% c("qtl", "qtl.slope", "qtl.adj", "qtl.hed", "qtl.epi") == FALSE) { #Frequencies for deleterious recessives and neutral loci
                 allele1 <- unname(sapply(data, '[[', 2*j-1)) #Get element [1,2*j-1] from each individual
                 allele2 <- unname(sapply(data, '[[', 2*j)) #Get element [2,2*j] from each individual
                 
@@ -838,7 +871,7 @@ indsim.plasticity.simulate <- function(N, generations, sel.intensity, init.f, in
 
 #Need to incorporate between generation effects, mediated by epigenetics...
 #roxygen stuff
-indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, R, P, density.reg, allele.model, mu, n.chr, nloc.chr, nqtl, nqtl.slope, nqtl.adj, nqtl.hed, n.neutral = 0, linkage.map = "random", linkage = NULL, kd, ka) {
+indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, R, P, density.reg, allele.model, mu, n.chr, nloc.chr, nqtl, nqtl.slope, nqtl.adj, nqtl.hed, nqtl.epi, n.neutral = 0, linkage.map = "random", linkage = NULL, kd, ka, ke) {
 
     #Initialize time
     timesteps <- generations*L #There are ngenerations*L time steps in the model
@@ -849,16 +882,17 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
     
     #Prepare linkage groups
     foo <- list(0)
-    nloc <- nqtl + n.neutral + nqtl.slope + nqtl.adj + nqtl.hed
+    nloc <- nqtl + n.neutral + nqtl.slope + nqtl.adj + nqtl.hed + nqtl.epi
 
     #Perform some checks that initial parameters are sensible
     if(nloc != sum(nloc.chr)) { stop("Number of loci and loci per chromosome don't match!") }
 
-    loc.attributes <- sample(c(rep("qtl", nqtl), rep("neutral", n.neutral), rep("qtl.slope", nqtl.slope), rep("qtl.adj", nqtl.adj), rep("qtl.hed", nqtl.hed)), size = nloc, replace = FALSE) #Types for all loci
+    loc.attributes <- sample(c(rep("qtl", nqtl), rep("neutral", n.neutral), rep("qtl.slope", nqtl.slope), rep("qtl.adj", nqtl.adj), rep("qtl.hed", nqtl.hed), rep("qtl.epi", nqtl.epi)), size = nloc, replace = FALSE) #Types for all loci
     qtl.ind <- (1:nloc)[loc.attributes == "qtl"] #Indices of loci that affect the phenotype (via intercept)
     qtl.slope.ind <- (1:nloc)[loc.attributes == "qtl.slope"] #Indices for loci that affect the phenotype (via reaction norm slope)
     qtl.adj.ind <- (1:nloc)[loc.attributes == "qtl.adj"] #Indices for loci for plasticity adjustment
     qtl.hed.ind <- (1:nloc)[loc.attributes == "qtl.hed"] #Indices for loci for canalization / hedging
+    qtl.epi.ind <- (1:nloc)[loc.attributes == "qtl.epi"] #Indices for loci for epigenetic modification
 
     alleles <- rep(list(c(0,1)), nloc) #Alleles for all except qtl
     
@@ -886,8 +920,8 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
     #Initialize the results matrix
     #We want to monitor phenotypes, allele freqs, heritabilities, variances etc. etc.
     #Monitoring also population mean intercept and slope (at genotypic values)
-    results.mat.pheno <- matrix(rep(0, generations*9), ncol = 9)
-    colnames(results.mat.pheno) <- c("generation", "pop.mean", "var.a", "W.mean", "N", "G.int", "G.slope", "G.adj", "G.hed")
+    results.mat.pheno <- matrix(rep(0, generations*10), ncol = 10)
+    colnames(results.mat.pheno) <- c("generation", "pop.mean", "var.a", "W.mean", "N", "G.int", "G.slope", "G.adj", "G.hed", "G.epi")
     results.mat.pheno[,1] <- 1:generations #Store generation numbers
 
     results.mat.alleles <- matrix(rep(0, generations*(nloc+1)), ncol = nloc+1)
@@ -924,7 +958,8 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
         if(N < 2) {stop("Population went extinct! : (")}
 
         #Calculate allele frequencies
-        results.mat.alleles[g,2:(nloc+1)] <- calc.al.freq(ind.mat, length(ind.mat), nloc, allele.model, loc.attributes)
+        #Removing epigenetic marks for allelic effect calculation
+        results.mat.alleles[g,2:(nloc+1)] <- calc.al.freq(lapply(ind.mat, Re), length(ind.mat), nloc, allele.model, loc.attributes)
 
         #Argument type needs to have value of either "biallelic" or "infinite"
         #Calculate genotypic effects for intercept effects
@@ -934,29 +969,44 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
 
         ind.Gadj <- calc.genot.effects.lim(ind.mat, ae, type = allele.model, qtl.adj.ind, nloc, limits = c(0,1)) #Calculate genotype effects for plasticity adjustment
         ind.Ghed <- calc.genot.effects.lim(ind.mat, ae, type = allele.model, qtl.hed.ind, nloc, limits = c(0,3)) #Calculate genotype effects for canalization / bet-hedging adjustment
+        ind.Gepi <- calc.genot.effects.lim(ind.mat, ae, type = allele.model, qtl.epi.ind, nloc, limits = c(0,1)) #Calculate genotype effects for epigenetic modification probability
+        
         
         #Calculate environmental effects
-        ind.E <- rnorm(n = N, mean = 0, sd = sigma.e + ind.Ghed) #Add sigma.e and bethedging effects
+        ind.E <- rnorm(n = N, mean = 0, sd = sigma.e + ind.Ghed) #Add sigma.e and bet-hedging effects
 
-        #Calculate phenotypes for first life stage
-        ind.P <- ind.Ga + ind.Gb*cues[1 + L*(g-1)] + ind.E #First life stage (development)
-        
+        #Calculate phenotypes for the juvenile stage, using epigenetically marked slope loci
+        ind.Gepimod <- calc.genot.effects.epi(ind.mat, qtl.slope.ind, nloc)
+        ind.P <- ind.Ga + ind.Gepimod + ind.E
+
         ##Environmental mismatches
         ind.M <- matrix(rep(0, N*L), ncol = L) #Initialize mismatch matrix
         ind.M[,1] <- abs(E[1 + L*(g-1)] - ind.P) #First env. mismatch
 
+        ##Epigenetic effects are reset
+        ind.mat <- reset.epigenetics(ind.mat)
+
         ##Costs of plasticity
         #ind.costs <- rep(0, N) #Initialize costs vector
-        ind.costs <- ifelse(ind.Gb > 0, kd, 0)
+        ind.costs <- ifelse(ind.Gepimod > 0, ke, 0)
+        
+        #Calculate phenotypes for first adult stage (developmental plasticity happens)
+        ind.P <- ind.Ga + ind.Gb*cues[2 + L*(g-1)] + ind.E #First adult stage (development)
+
+        ind.M[,2] <- abs(E[2 + L*(g-1)] - ind.P) #Second env. mismatch
+        ind.costs <- ind.costs + ifelse(ind.Gb > 0, kd, 0)
         
         #Loop over the rest life stages (phenotypic adjustment can happen)
-        for(j in 2:L) {
+        for(j in 3:L) {
             ind.adjustment <- rbinom(n = N, size = 1, prob = ind.Gadj) #Did adjustment happen
             new.P <- ind.Ga + ind.Gb*cues[j + L*(g-1)] + ind.E #Calculate new phenotypes
             ind.P[ind.adjustment == 1] <- new.P[ind.adjustment == 1] #Adjust phenotypes
             ind.M[,j] <- abs(E[j + L*(g-1)] - ind.P) #Calculate second mismatch
             ind.costs <- ind.costs + ifelse(ind.Gb > 0, ka*ind.adjustment, 0) #Calculate costs
         }
+
+        ### Modify loci epigenetically using the cue in the last life stage = L
+        ind.mat <- epigenetic.modification(ind.mat, qtl.slope.ind, cues[5+L*(g-1)], ind.Gepi)
 
         #Store phenotypes
         results.mat.pheno[g,2] <- mean(ind.P) #Population mean of trait in final life stage
@@ -965,6 +1015,7 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
         results.mat.pheno[g,7] <- mean(ind.Gb) #Mean slope genotypic value
         results.mat.pheno[g,8] <- mean(ind.Gadj) #Mean plasticity adjustment genotypic value
         results.mat.pheno[g,9] <- mean(ind.Ghed) #Mean bet-hedging genotypic value
+        results.mat.pheno[g,10] <- mean(ind.Gepi) #Mean epigenetic modification probability (gen.val.)
         
         
         ##Calculate fitness over all life-stages, subtract costs of plasticity
@@ -1016,7 +1067,7 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
                     mut.ind <- lapply(mut.ind, mutate.K.alleles, l = l, alleles = alleles) #Mutate alleles
                 }
                 if(allele.model == "infinite") {
-                    if(loc.attributes[l] == "qtl" | loc.attributes[l] == "qtl.slope" | loc.attributes[l] == "qtl.adj" | loc.attributes[l] == "qtl.hed") {
+                    if(loc.attributes[l] == "qtl" | loc.attributes[l] == "qtl.slope" | loc.attributes[l] == "qtl.adj" | loc.attributes[l] == "qtl.hed" | loc.attributes[l] == "qtl.epi") {
                         mut.ind <- lapply(mut.ind, mutate.inf.alleles, l = l) } else {
                             mut.ind <- lapply(mut.ind, mutate.K.alleles, l = l, alleles = alleles) }
                 }
@@ -1137,7 +1188,7 @@ plot_inf.alleles <- function(data, nloc, loc.attr, plasticity = FALSE) {
       ggplot2::facet_wrap(~ locus) }
     ##Plot when plasticity is used
     if(plasticity == TRUE) {
-        allele.long <- allele.long[allele.long$loctype == "qtl" | allele.long$loctype == "qtl.slope" | allele.long$loctype == "qtl.adj" | allele.long$loctype == "qtl.hed",]
+        allele.long <- allele.long[allele.long$loctype == "qtl" | allele.long$loctype == "qtl.slope" | allele.long$loctype == "qtl.adj" | allele.long$loctype == "qtl.hed" | allele.long$loctype == "qtl.epi",]
 
         #ggplot2
         ggplot2::ggplot(allele.long, aes(x = effect)) +
