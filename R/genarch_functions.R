@@ -687,182 +687,10 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
     #Return results
     return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes))
 }
-    
 
-###This is a function that allows the evolution of phenotypic plasticity
-#Need to add roxygen stuff to this
-
-indsim.plasticity.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, env.cue, density.reg, allele.model, mu, n.chr, nloc.chr, nqtl, nqtl.slope, n.delres = 0, delres.ef = NULL, n.neutral = 0, linkage.map = "random", linkage = NULL) {
-
-    #Prepare linkage groups
-    foo <- list(0)
-    nloc <- nqtl + n.delres + n.neutral + nqtl.slope
-
-    #Perform some checks that initial parameters are sensible
-    if(nloc != sum(nloc.chr)) { stop("Number of loci and loci per chromosome don't match!") }
-
-    loc.attributes <- sample(c(rep("qtl", nqtl), rep("neutral", n.neutral), rep("delres", n.delres), rep("qtl.slope", nqtl.slope)), size = nloc, replace = FALSE) #Types for all loci
-    delres.ind <- (1:nloc)[loc.attributes == "delres"] #Indices of deleterious recessives
-    qtl.ind <- (1:nloc)[loc.attributes == "qtl"] #Indices of loci that affect the phenotype (via intercept)
-    qtl.slope.ind <- (1:nloc)[loc.attributes == "qtl.slope"] #Indices for loci that affect the phenotype (via reaction norm slope)
-
-    alleles <- rep(list(c(0,1)), nloc) #Alleles for all except qtl
-    
-    if(allele.model == "biallelic") { #Setup biallelic effects
-        #alleles <- rep(list(c(0,1)), nloc) #All loci biallelic
-        q <- (1:(nqtl+1)/(nqtl+1))[-(nqtl+1)]
-        ae <- qnorm(q, mean = 0, sd = 1) #Allelic effects are distributed normally
-        #ae <- dnorm(seq(from = -5, to = -1, length.out = nloc), mean = 0, sd = 1)*10
-        ae <- sample(ae, length(ae)) #Randomize allelic effects among loci
-        temp <- rep(0,nloc)
-        temp[qtl.ind] <- ae
-        ae <- temp }
-
-    #Setup linkage map
-    if(linkage.map == "random") {
-        linkage <- rep(foo, n.chr)
-        for(i in 1:n.chr) {
-            linkage[[i]] <- matrix(rep(0,3*nloc.chr[i]), ncol = nloc.chr[i])
-            linkage[[i]][3,] <- sort(runif(nloc.chr[i])) #Map-positions for each locus
-        }
-    }
-
-    #Simulation with logistic population regulation and natural selection
-
-    #Initialize the results matrix
-    #We want to monitor phenotypes, allele freqs, heritabilities, variances etc. etc.
-    #Monitoring also population mean intercept and slope (at genotypic values)
-    results.mat.pheno <- matrix(rep(0, generations*9), ncol = 9)
-    colnames(results.mat.pheno) <- c("generation", "pop.mean", "sel.mean", "var.a", "h2", "W.mean", "N", "G.int", "G.slope")
-    results.mat.pheno[,1] <- 1:generations #Store generation numbers
-
-    results.mat.alleles <- matrix(rep(0, generations*(nloc+1)), ncol = nloc+1)
-    results.mat.alleles[,1] <- 1:generations
-    colnames(results.mat.alleles) <- c("generation", c(paste(rep("locus", nloc), 1:nloc, sep = "")))
-
-    #Initilize the simulation
-    loc.mat <- matrix(rep(0,2*nloc), ncol = nloc)
-    ind.mat <- rep(list("genotype" = loc.mat), N) #List for individuals
-
-    #Allele frequencies
-    init.freq <- rep(init.f,nloc) #for p
-    #Here can also make explicit initial frequencies for qtls, delres and neutral markers
-    if(n.neutral > 0) { init.freq[loc.attributes == "neutral"] <- init.n } #Neutral markers start at these frequencies
-
-    #Genotype frequencies
-    genotype.mat <- matrix(rep(0,3*nloc), ncol = nloc)
-    rownames(genotype.mat) <- c("AA", "Aa", "aa")
-
-    #Initialize genotype frequencies
-    for(i in 1:nloc) {
-        genotype.mat[,i] <- HW.genot.freq(init.freq[i])
-    }
-    #################################
-
-    ind.mat <- initialise.ind.mat(ind.mat, genotype.mat, N, nloc) #Sample starting genotypes
-
-
-    #Loop over generations
-    for(g in 1:generations) {
-
-        #Check for extinction
-        if(N < 2) {stop("Population went extinct! : (")}
-
-        #Calculate allele frequencies
-        results.mat.alleles[g,2:(nloc+1)] <- calc.al.freq(ind.mat, length(ind.mat), nloc, allele.model, loc.attributes)
-        
-
-        #Argument type needs to have value of either "biallelic" or "infinite"
-        #Calculate genotypic effects for intercept effects
-        ind.Ga <- calc.genot.effects(ind.mat, ae, type = allele.model, qtl.ind, nloc) #Calculate genotype effects
-        #Calculate genotypic effects for slope effects
-        ind.Gb <- calc.genot.effects(ind.mat, ae, type = allele.model, qtl.slope.ind, nloc)
-        #sigma.e <- (abs(ind.G) + 1)*coef.e #Environmental variation scales with genotypic effects
-        #Calculate total genotypic value in the current environment (based on env.cue)
-        ind.G <- ind.Ga + ind.Gb*env.cue[g]
-        
-        #Calculate environmental and phenotypic effects
-        ind.E <- rnorm(n = N, mean = 0, sd = sigma.e)
-        ind.P <- ind.G + ind.E
-        ###############################################
-
-        #Store phenotypes    
-        results.mat.pheno[g,2] <- mean(ind.P) #Trait mean
-        results.mat.pheno[g,4] <- var(ind.G) #Additive genetic variance
-        results.mat.pheno[g,5] <- var(ind.G)/var(ind.P) #Heritability
-        results.mat.pheno[g,8] <- mean(ind.Ga) #Mean intercept genotypic value
-        results.mat.pheno[g,9] <- mean(ind.Gb) #Mean slope genotypic value
-        
-        #Calculate fitnesses
-        ind.W <- calc.fitness(ind.P, opt.pheno[g], sel.intensity)
-        if(n.delres > 0) {
-            #Calculate fitness effects of deleterious recessives
-            ind.W <- ind.W*delres.fitness(ind.mat, delres.ef, delres.ind, nloc)
-        }
-        
-
-        results.mat.pheno[g,6] <- mean(ind.W) #Population mean fitness
-        results.mat.pheno[g,7] <- N #Population size
-        
-        ### Reproduction ###
-        #Using logistic density regulation
-        if(density.reg == "logistic") {
-            #Calculate the number of offspring the population produces
-            #Logistic population regulation
-            No <- round(N*K*(1+r) / (N*(1+r) - N + K)) #Logistic population growth
-            #Scale number of offspring by population mean fitness
-            No <- round(mean(ind.W)*No); if(No < 1) {stop("Population went extinct! : (")}
-            ind.mat <- produce.gametes.W(ind.mat, loc.mat, No, ind.W, link.map = T, linkage, nloc.chr, n.chr)
-        }
-
-        #Population regulation via Mikael's method
-        if(density.reg == "sugar") {
-            #Calculate the number of offspring that each individual produces
-            No <- rpois(n = N, lambda = B*ind.W)
-            #If number of offspring larger than K, remove some offspring randomly
-            if(sum(No) > K) {
-                while(sum(No) > K) { #Remove individuals until only K are left, seems slow...
-                    no.ind <- (1:length(No))[No > 0] #Indexes of cases where No > 0
-                    rem.ind <- sample(no.ind, 1)
-                    No[rem.ind] <- No[rem.ind] - 1
-                }
-            }
-            ind.mat <- produce.gametes.W.No(ind.mat, loc.mat, No, ind.W, link.map = T, linkage, nloc.chr, n.chr)
-        }
-        
-        #Next generation
-        N <- length(ind.mat) #Store new population size
-
-        ### Mutation ###
-        #Produce mutations
-        mutations <- rep(foo, nloc)
-        #Has to be 2*mu since mutations happen on individual basis and each ind has 2 copies
-        mutations <- lapply(mutations, gen.mutations, N = N, mu = 2*mu) 
-        for(l in 1:nloc) { #Loop over all loci
-            if(any(mutations[[l]] == 1) == TRUE) { #Did any mutations happen?
-                mut.ind <- ind.mat[mutations[[l]] == 1] #Select individuals to be mutated
-                if(allele.model == "biallelic") { #Which alleles model is used?
-                    mut.ind <- lapply(mut.ind, mutate.K.alleles, l = l, alleles = alleles) #Mutate alleles
-                }
-                if(allele.model == "infinite") {
-                    if(loc.attributes[l] == "qtl" | loc.attributes[l] == "qtl.slope") {
-                        mut.ind <- lapply(mut.ind, mutate.inf.alleles, l = l) } else {
-                            mut.ind <- lapply(mut.ind, mutate.K.alleles, l = l, alleles = alleles) }
-                }
-                ind.mat[mutations[[l]] == 1] <- mut.ind #Store results
-            }
-        }
-    ########################    
-        
-        
-    } #Done looping over generations
-
-
-    #Modify results matrices if necessary
-
-    #Return results
-    return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes))
-}
+###########################################
+### End of individual based simulations ###
+####################################################################################################
 
 #####################################################################################################
 ##################################################################
@@ -871,6 +699,41 @@ indsim.plasticity.simulate <- function(N, generations, sel.intensity, init.f, in
 
 #Need to incorporate between generation effects, mediated by epigenetics...
 #roxygen stuff
+#This function performs individuals based simulations with model similar to Botero, evolution of plasticity and between generations effects are possible
+#' Simulations with plasticity
+#'
+#' This function performs simulations with plasticity and epigenetic effects in fluctuating environments.
+#'
+#'
+#' @param N Starting population size
+#' @param generations Number of generations to run the simulations
+#' @param L Number of timesteps in each generation
+#' @param sel.intensity Selection intensity for stabilising selection
+#' @param init.f Initial allele frequencies for QTL
+#' @param init.n Initial allele frequencies for neutral loci
+#' @param sigma.e Environmental standard deviations of the phenotypic trait
+#' @param K Carrying capacity of the population
+#' @param density.reg How population density is regulated. Currently there are two possible values:  "logistic" which implements logistic population density regulation (see manual) and "sugar" which constrains population to carrying capacity by randomly removing individuals when population size is higher than K
+#' @param r If density regulation is "logistic", this is the population growth rate.
+#' @param B If density regulation is "sugar", this it the mean number of offspring each perfectly adapted individual has
+#' @param R Rate of environmental change relative to generation time
+#' @param P Predictability of the environment
+#' @param allele.model Which allele model to use for qtl. Currently the options are: "infinite" which uses an infinite alleles model for qtl, and "biallelic" which uses a biallelic model for qtl
+#' @param nqtl Number of loci affecting the phenotype (intercept)
+#' @param nqtl.slope Number of loci affecting phenotype (slope)
+#' @param ntql.adj Number of loci affecting phenotype (probability of phenotypic adjustment)
+#' @param ntql.hed Number of loci affecting phenotype (bethedging)
+#' @param nqtl.epi Number of loci affecting phenotype (probability of epigenetic modification)
+#' @param mu Mutation rate, which currently is the same for all loci
+#' @param n.chr Number of chromosomes (linkage groups)
+#' @param nloc.chr Vector of the length of n.chr giving number of loci for each chromosome
+#' @param n.neutral Number of neutral loci, defaults to 0
+#' @param linkage.map If map distances are determined randomly, set this to "random", if fixed linkage map is provided can set this to "user"
+#' @param linkage Matrix of 3 rows and nloc columns, first two rows can be zeros and third row determines map distances relative to chromosome coordinates from 0 to 1
+#' @param kd Fitness cost of developmental plasticity
+#' @param ka Fitness cost of reversible plasticity
+#' @param ke Fitness cost of epigenetic adjustment
+#' @export
 indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, R, P, density.reg, allele.model, mu, n.chr, nloc.chr, nqtl, nqtl.slope, nqtl.adj, nqtl.hed, nqtl.epi, n.neutral = 0, linkage.map = "random", linkage = NULL, kd, ka, ke) {
 
     #Initialize time
