@@ -1121,7 +1121,12 @@ coloured.noise <- function(kappa = 0, mean = 0, sd = 1, generations = 100) {
 }
 
 ### 1/f noise ###
-#Generating noise using sinusoidal processes, Following Cohen et al. 2009 
+#Generating noise using sinusoidal processes, Following Cohen et al. 2009
+#' Generate 1/f noise
+#' @param beta Noise parameter
+#' @param generation Number of generations to generate
+#' @param final.sd Final standard deviation
+#' @export
 f.noise <- function(beta = 0, generations = 100, final.sd = 1) {
    #Need to generate generations/2 waves, where generations is even
    all.waves <- matrix(rep(0, generations*generations/2), ncol = generations)
