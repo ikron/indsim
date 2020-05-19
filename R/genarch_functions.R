@@ -850,14 +850,15 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
         ind.mat <- reset.epigenetics(ind.mat)
 
         ##Costs of plasticity
+        #Note! Using some thresholds for plasticity costs that is 0.05 below that there are no costs
         #ind.costs <- rep(0, N) #Initialize costs vector
-        ind.costs <- ifelse(ind.Gepimod > 0, ke, 0)
+        ind.costs <- ifelse(ind.Gepimod > 0.05 | ind.Gepimod < -0.05, ke, 0)
         
         #Calculate phenotypes for first adult stage (developmental plasticity happens)
         ind.P <- ind.Ga + ind.Gb*cues[2 + L*(g-1)] + ind.E #First adult stage (development)
 
         ind.M[,2] <- abs(E[2 + L*(g-1)] - ind.P) #Second env. mismatch
-        ind.costs <- ind.costs + ifelse(ind.Gb > 0, kd, 0)
+        ind.costs <- ind.costs + ifelse(ind.Gb > 0.05 | ind.Gb < -0.05, kd, 0)
         
         #Loop over the rest life stages (phenotypic adjustment can happen)
         for(j in 3:L) {
@@ -865,7 +866,7 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
             new.P <- ind.Ga + ind.Gb*cues[j + L*(g-1)] + ind.E #Calculate new phenotypes
             ind.P[ind.adjustment == 1] <- new.P[ind.adjustment == 1] #Adjust phenotypes
             ind.M[,j] <- abs(E[j + L*(g-1)] - ind.P) #Calculate second mismatch
-            ind.costs <- ind.costs + ifelse(ind.Gb > 0, ka*ind.adjustment, 0) #Calculate costs
+            ind.costs <- ind.costs + ifelse(ind.Gb > 0.05 | ind.Gb < -0.05, ka*ind.adjustment, 0) #Calculate costs
         }
 
         ### Modify loci epigenetically using the cue in the last life stage = L
@@ -1020,6 +1021,7 @@ plot_allele.results <- function(data, nloc, loc.attr) {
 #' @param data List of individual genotypes, produced by function (link to be addded)
 #' @param nloc Number of loci used in the simulation
 #' @param loc.attr Types for the different loci, output by indsim.simulate (link to be added)
+#' @param plasticity Whether plasticity simulations were used or not
 #' @export
 plot_inf.alleles <- function(data, nloc, loc.attr, plasticity = FALSE) {
 
@@ -1042,7 +1044,7 @@ plot_inf.alleles <- function(data, nloc, loc.attr, plasticity = FALSE) {
     allele.long <- allele.long[allele.long$loctype == "qtl",] #Drop all loci that are not qtls
     
     #Plot with ggplot2
-    ggplot2::ggplot(allele.long, aes(x = effect)) +
+myplot <-  ggplot2::ggplot(allele.long, aes(x = effect)) +
       ggplot2::geom_histogram(aes(y = ..count../(2*N)), colour = "black", fill = "white", binwidth = 0.1) +
       ggplot2::geom_vline(aes(xintercept =0), linetype = "dashed") +
       ggplot2::xlab("Allelic effect") +
@@ -1054,14 +1056,15 @@ plot_inf.alleles <- function(data, nloc, loc.attr, plasticity = FALSE) {
         allele.long <- allele.long[allele.long$loctype == "qtl" | allele.long$loctype == "qtl.slope" | allele.long$loctype == "qtl.adj" | allele.long$loctype == "qtl.hed" | allele.long$loctype == "qtl.epi",]
 
         #ggplot2
-        ggplot2::ggplot(allele.long, aes(x = effect)) +
+myplot <-  ggplot2::ggplot(allele.long, aes(x = effect)) +
             ggplot2::geom_histogram(aes(y = ..count../(2*N)), colour = "black", fill = "white", binwidth = 0.1) +
             ggplot2::geom_vline(aes(xintercept =0), linetype = "dashed") +
             ggplot2::xlab("Allelic effect") +
             ggplot2::ylab("Allele frequency") +
             ggplot2::scale_y_continuous(limits = c(0,1), expand = c(0,0)) +
-            ggplot2::facet_wrap(loctype ~ locus) }    
+            ggplot2::facet_wrap(loctype ~ locus) }
     
+   print(myplot) 
 }
 
 ##This function plots the mean reaction norm of the population
@@ -1080,10 +1083,10 @@ plot_reaction.norm <- function(data) {
     cue <- seq(-1, 1, by = 0.1)
     phenotype <- a + b*(cue)
     ctype <- "black"
-    if(b > 0.1) {
+    if((b > 0.1 | b < -0.1) == TRUE) {
         if(data$G.adj[finalgen] > 0.1) { ctype <- "red" } else { ctype <- "blue" }
     }
-    if(data$G.hed[finalgen] > 0.1) { cytpe <- "green" }
+    if(data$G.hed[finalgen] > 0.1) { ctype <- "green" }
     
     plotdata <- data.frame(cue = cue, phenotype = phenotype)
     
@@ -1093,6 +1096,7 @@ plot_reaction.norm <- function(data) {
         ggplot2::xlab("Environmental cue") +
         ggplot2::ylab("Phenotype")    
 }
+
 
 ################################################################
 
