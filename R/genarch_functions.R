@@ -105,10 +105,8 @@ reset.epigenetics <- function(ind.mat) {
 }
 
 ##This function inserts epigenetic modifications to certain loci
-        epigenetic.modification <- function(ind.mat, qtl.ind, cue, ind.Gepi) {
+        epigenetic.modification <- function(ind.mat, qtl.ind, cue, epi.mod.ind) {
             modify <- function(x, loc, cue) { x[,loc] <- x[,loc] + cue*1i; return(x) }
-            N.ind <- length(ind.Gepi)
-            epi.mod.ind <- rbinom(n = N.ind, size = 1, prob = ind.Gepi) #Does epigenetic mod happen?
             select.inds <- ind.mat[as.logical(epi.mod.ind)] #
             select.inds <- lapply(select.inds, modify, qtl.ind, cue) #Epigenetically modify the qtl.slope loci
             ind.mat[as.logical(epi.mod.ind)] <- select.inds
@@ -851,8 +849,8 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
 
         ##Costs of plasticity
         #Note! Using some thresholds for plasticity costs that is 0.05 below that there are no costs
-        #ind.costs <- rep(0, N) #Initialize costs vector
-        ind.costs <- ifelse(ind.Gepimod > 0.05 | ind.Gepimod < -0.05, ke, 0)
+        ind.costs <- rep(0, N) #Initialize costs vector
+        
         
         #Calculate phenotypes for first adult stage (developmental plasticity happens)
         ind.P <- ind.Ga + ind.Gb*cues[2 + L*(g-1)] + ind.E #First adult stage (development)
@@ -865,12 +863,15 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
             ind.adjustment <- rbinom(n = N, size = 1, prob = ind.Gadj) #Did adjustment happen
             new.P <- ind.Ga + ind.Gb*cues[j + L*(g-1)] + ind.E #Calculate new phenotypes
             ind.P[ind.adjustment == 1] <- new.P[ind.adjustment == 1] #Adjust phenotypes
-            ind.M[,j] <- abs(E[j + L*(g-1)] - ind.P) #Calculate second mismatch
+            ind.M[,j] <- abs(E[j + L*(g-1)] - ind.P) #Calculate next mismatch
             ind.costs <- ind.costs + ifelse(ind.Gb > 0.05 | ind.Gb < -0.05, ka*ind.adjustment, 0) #Calculate costs
         }
 
         ### Modify loci epigenetically using the cue in the last life stage = L
-        ind.mat <- epigenetic.modification(ind.mat, qtl.slope.ind, cues[5+L*(g-1)], ind.Gepi)
+        epi.mod.ind <- rbinom(n = N, size = 1, prob = ind.Gepi) #Does epigenetic modification happen?
+        ind.mat <- epigenetic.modification(ind.mat, qtl.slope.ind, cues[5+L*(g-1)], epi.mod.ind)
+        #Costs of epigenetic modification
+        ind.costs <- ind.costs + ifelse(ind.Gepi > 0.05, ke*epi.mod.ind, 0)
 
         #Store phenotypes
         results.mat.pheno[g,2] <- mean(ind.P) #Population mean of trait in final life stage
