@@ -384,6 +384,10 @@ make.gamete <- function(linkage.gamete) {
 gen.mutations <- function(x, N, mu) {
     x <- rbinom(N, size = 1, prob = mu) }
 
+#Do mutations occur or not. Version for unique mutation rates per locus
+gen.mutations.loc <- function(x, N) {
+    rbinom(N, size = 1, prob = x) }
+
 #This function makes mutations with the K-alleles model
         mutate.K.alleles <- function(x, l, alleles) {
             mut.al.ind <- sample(c(1,2),1)
@@ -397,6 +401,13 @@ gen.mutations <- function(x, N, mu) {
 mutate.inf.alleles <- function(x, l) {
     mut.al.ind <- sample(c(1,2),1)
     x[mut.al.ind,l] <- rnorm(1, mean = 0, sd = 1) #This may need to changed accordingly
+    return(x)
+}
+
+#This function makes deleterious mutations according to the empirical distribution
+mutate.delres.alleles <- function(x, l) {
+    mut.al.ind <- sample(c(1,2),1)
+    x[mut.al.ind,l] <- ifelse(rbinom(1,1,0.3), 1, rbeta(1, 1, 6)) #Empirical distribution
     return(x)
 }
 
@@ -471,16 +482,17 @@ calc.Ne <- function(af1, af2, N1, N2, nloc, t) {
     }
 
 #Calculate fitness effects of deleterious mutations
-delres.fitness <- function(ind.mat, delres.ef, delres.ind, nloc) {
+delres.fitness <- function(ind.mat, delres.ind, nloc) {
     mydselect <- function(x, delres.ind, nloc) {x[1:2, (1:nloc %in% delres.ind)]}
     ind.mat <- lapply(ind.mat, mydselect, delres.ind, nloc) #Select only deleterious recessives
-
-    #Need to define some helper function to look if both alleles contain deleterious recessive
-    delres.check <- function(ind.mat) {all(ind.mat == 1)}
+    ##Check that both alleles are different from zero, return the smallest value if true, 0 if false
+    delres.check <- function(ind.mat) { ifelse(all(ind.mat != 0), min(ind.mat), 0) }
     delres.check2 <- function(ind.mat) { apply(ind.mat, MARGIN = 2, delres.check) }
     delr.mat <- lapply(ind.mat, delres.check2) #Check all genotypes
-    delr.vec <- as.vector(unlist(lapply(delr.mat, sum)))
-    return((1-delres.ef)^delr.vec) #Calculate effects on fitness
+    ##Calculate effect on fitness for each ind, effects are multiplicative
+    delres.ef <- function(delr.mat) { prod(1-delr.mat) }
+    delr.vec <- as.vector(unlist(lapply(delr.mat, delres.ef))) #Calculate effects on fitness
+    return(delr.vec) 
 }
  
 #################################################################
@@ -505,16 +517,17 @@ delres.fitness <- function(ind.mat, delres.ef, delres.ind, nloc) {
 #' @param B If density regulation is "sugar", this it the mean number of offspring each perfectly adapted individual has
 #' @param allele.model Which allele model to use for qtl. Currently the options are: "infinite" which uses an infinite alleles model for qtl, and "biallelic" which uses a biallelic model for qtl
 #' @param nqtl Number of loci affecting the phenotype
-#' @param mu Mutation rate, which currently is the same for all loci
+#' @param mu.qtl Mutation rate for qtl loci
+#' @param mu.delres Mutation rate for deleterious recessives
+#' @param mu.neutral Mutation rate for neutral loci
 #' @param n.chr Number of chromosomes (linkage groups)
 #' @param nloc.chr Vector of the length of n.chr giving number of loci for each chromosome
 #' @param n.delres Number of deleterious recessives, defaults to 0
-#' @param delres.ef Effects of deleterious recessives on fitness (these are multiplicative), for example: setting this parameter to 0.1 means that fitness of an individuals that is homozygous for the allele is 1 - 0.1 = 0.9
 #' @param n.neutral Number of neutral loci, defaults to 0
 #' @param linkage.map If map distances are determined randomly, set this to "random", if fixed linkage map is provided can set this to "user"
 #' @param linkage Matrix of 3 rows and nloc columns, first two rows can be zeros and third row determines map distances relative to chromosome coordinates from 0 to 1
 #' @export
-indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, density.reg, allele.model, mu, n.chr, nloc.chr, nqtl, n.delres = 0, delres.ef = NULL, n.neutral = 0, linkage.map = "random", linkage = NULL) {
+indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, density.reg, allele.model, mu.qtl, mu.delres = 0, mu.neutral = 0, n.chr, nloc.chr, nqtl, n.delres = 0, n.neutral = 0, linkage.map = "random", linkage = NULL) {
 
     #Prepare linkage groups
     foo <- list(0)
@@ -522,10 +535,16 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
 
     #Perform some checks that initial parameters are sensible
     if(nloc != sum(nloc.chr)) { stop("Number of loci and loci per chromosome don't match!") }
+    if(n.delres > 0 & mu.delres == 0) {stop("Mutation rate of deleterious recessives is zero!") }
 
     loc.attributes <- sample(c(rep("qtl", nqtl), rep("neutral", n.neutral), rep("delres", n.delres)), size = nloc, replace = FALSE) #Types for all loci
     delres.ind <- (1:nloc)[loc.attributes == "delres"] #Indices of deleterious recessives
     qtl.ind <- (1:nloc)[loc.attributes == "qtl"] #Indices of loci that affect the phenotype
+    #Locus specific mutation rates
+    loc.mu <- rep(0, nloc)
+    loc.mu[delres.ind] <- mu.delres
+    loc.mu[qtl.ind] <- mu.qtl
+    loc.mu[(1:nloc)[loc.attributes == "neutral"]] <- mu.neutral
 
     alleles <- rep(list(c(0,1)), nloc) #Alleles for all except qtl
     
@@ -563,6 +582,7 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
     if(n.neutral > 0) { results.mat.alleles <- cbind(results.mat.alleles, c(rep(NA,10), rep(0, generations-10)))
                         colnames(results.mat.alleles)[nloc+2] <- "Ne"
                         neutral.index <- (1:nloc)[loc.attributes == "neutral"] + 1 }
+    ##Note that + 1 in neutral index is because some following calculations use allele frequencies and column numbers need to be adjusted by one because first column is generation number
 
     #Initilize the simulation
     loc.mat <- matrix(rep(0,2*nloc), ncol = nloc)
@@ -616,7 +636,7 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
         ind.W <- calc.fitness(ind.P, opt.pheno[g], sel.intensity)
         if(n.delres > 0) {
             #Calculate fitness effects of deleterious recessives
-            ind.W <- ind.W*delres.fitness(ind.mat, delres.ef, delres.ind, nloc)
+            ind.W <- ind.W*delres.fitness(ind.mat, delres.ind, nloc)
         }
         
 
@@ -624,7 +644,7 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
         results.mat.pheno[g,7] <- N #Population size
 
         #Calculate effective population size (if g > 10)
-        if(g > 10) { results.mat.alleles[g,(nloc+2)] <- calc.Ne(af1 = results.mat.alleles[(g-10), neutral.index], af2 = results.mat.alleles[g, neutral.index], N1 = results.mat.pheno[g-10,7], N2 = results.mat.pheno[g,7], nloc = n.neutral, t = 10) }
+        if(g > 10 & n.neutral > 0) { results.mat.alleles[g,(nloc+2)] <- calc.Ne(af1 = results.mat.alleles[(g-10), neutral.index], af2 = results.mat.alleles[g, neutral.index], N1 = results.mat.pheno[g-10,7], N2 = results.mat.pheno[g,7], nloc = n.neutral, t = 10) }
         
         ### Reproduction ###
         #Using logistic density regulation
@@ -659,7 +679,7 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
         #Produce mutations
         mutations <- rep(foo, nloc)
         #Has to be 2*mu since mutations happen on individual basis and each ind has 2 copies
-        mutations <- lapply(mutations, gen.mutations, N = N, mu = 2*mu) 
+        mutations <- lapply(2*loc.mu, gen.mutations.loc, N = N) 
         for(l in 1:nloc) { #Loop over all loci
             if(any(mutations[[l]] == 1) == TRUE) { #Did any mutations happen?
                 mut.ind <- ind.mat[mutations[[l]] == 1] #Select individuals to be mutated
@@ -667,9 +687,12 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
                     mut.ind <- lapply(mut.ind, mutate.K.alleles, l = l, alleles = alleles) #Mutate alleles
                 }
                 if(allele.model == "infinite") {
-                    if(loc.attributes[l] == "qtl") {
-                        mut.ind <- lapply(mut.ind, mutate.inf.alleles, l = l) } else {
-                            mut.ind <- lapply(mut.ind, mutate.K.alleles, l = l, alleles = alleles) }
+                   if(loc.attributes[l] == "qtl") {
+                       mut.ind <- lapply(mut.ind, mutate.inf.alleles, l = l) }
+                   if(loc.attributes[l] == "delres") {
+                       mut.ind <- lapply(mut.ind, mutate.delres.alleles, l = l) }
+                   if(loc.attributes[l] == "neutral") {   
+                       mut.ind <- lapply(mut.ind, mutate.K.alleles, l = l, alleles = alleles) }
                 }
                 ind.mat[mutations[[l]] == 1] <- mut.ind #Store results
             }
