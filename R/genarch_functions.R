@@ -365,10 +365,8 @@ produce.gametes <- function(sel.mat, loc.mat, N) {
                 n.crossover <- gen.n.crossover(n.chr, lambda = 0.56)
                 xo.positions.list <- rep(foo, n.chr)
                 xo.strands.list <- rep(foo, n.chr)
-                for(j in 1:n.chr) {
-                    xo.positions.list[[j]] <- sort(runif(n.crossover[j], min = 0, max = 1))
-                    xo.strands.list[[j]] <- sample(c(1,2,3,4), size = n.crossover[j], replace = T)
-                }
+                xo.positions.list <- lapply(n.crossover, my.xo.positions)
+                xo.strands.list <- lapply(n.crossover, my.xo.strands)
                 #Resolving crossovers and perform meiotic divisions
                 linkage.gamete2 <- resolve.crossovers(meiocyte = linkage.gamete2, xo.positions.list, xo.strands.list, strand.mat, n.chr, n.crossover)
                 gamete2 <- make.gamete(linkage.gamete2)
