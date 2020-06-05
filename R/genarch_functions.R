@@ -302,6 +302,92 @@ produce.gametes <- function(sel.mat, loc.mat, N) {
 }
 #####################################################################################33
 
+###########################################################
+#This function produces gametes on individual basis, 
+#Production and random union of gametes, individuals contribute to the next generation weighted by their fitness
+#This is a faster version of produce.gametes.W.No
+    produce.gametes.faster <- function(ind.mat, loc.mat, No, ind.W, link.map = F, linkage, nloc.chr, n.chr) {
+        
+    Nind <- length(ind.mat) #Number of parents
+    sum.No <- sum(No) #Total number of individuals to be produced
+    ind.mat.new <- rep(list("genotype" = loc.mat), sum.No) #List of the next generation of individuals, initialize
+    #4-strand index mat
+    strand.mat <- matrix(c(1,3,1,4,2,3,2,4), ncol = 4)
+  
+    n <- 1 #Initialize counter
+
+    No.ind <- No > 0 #Those individuals that have more than zero offspring
+    Nind2 <- (1:Nind)[No.ind]
+
+    #Pick the focal individual and another at random weighted by their fitness
+    #Selfing not possible
+    ind.index <- lapply(Nind2, my.sample.parents, Nind = Nind, No = No, ind.W = ind.W)  
+
+    #Need to produce No individuals
+    for(i in 1:length(ind.index)) { #Loop over all individuals (parents)
+        
+            
+           # ind.index <- c(i, sample((1:Nind)[-i], size = No[i], prob = ind.W[-i])) #Selfing not possible
+            for(k in 2:length(ind.index[[i]])) { #Loop over all offspring of focal individual
+                 
+                pind.mat <- ind.mat[c(ind.index[[i]][1], ind.index[[i]][k])]
+
+                #Free recombination
+                if(link.map == F) {
+                #produce gamates
+                #Gamete 1
+                ### This is for free recombination, modify this if linkage exists! ###
+                gamete1 <- apply(pind.mat[[1]], MARGIN = 2, sample, size = 1)
+                #Gamete 2
+                gamete2 <- apply(pind.mat[[2]], MARGIN = 2, sample, size = 1)
+                }
+
+                #Recombination using a linkage map
+                if(link.map == T) {
+                #Produce gametes
+                ### Gamete 1 ###
+                #Make a linkage format data from parent 1, in the four strand stage (i.e. pachytene)
+                linkage.gamete1 <- convert.indmat.2.linkage(linkage, pind.mat[[1]], nloc.chr, n.chr, fourstrand = T)
+                n.crossover <- gen.n.crossover(n.chr, lambda = 0.56) #This yields 1.56 crossovers per chromosome on avg.
+                #Generate crossover position and pick strands that participate
+                foo <- list(0)
+                xo.positions.list <- rep(foo, n.chr)
+                xo.strands.list <- rep(foo, n.chr)
+                xo.positions.list <- lapply(n.crossover, my.xo.positions)
+                xo.strands.list <- lapply(n.crossover, my.xo.strands)
+                #Resolving crossovers
+                linkage.gamete1 <- resolve.crossovers(meiocyte = linkage.gamete1, xo.positions.list, xo.strands.list, strand.mat, n.chr, n.crossover)
+                #Select chromosomes for gametes (i.e. meiotic divisions)
+                gamete1 <- make.gamete(linkage.gamete1)
+
+                ### Gamete2 ###
+                linkage.gamete2 <- convert.indmat.2.linkage(linkage, pind.mat[[2]], nloc.chr, n.chr, fourstrand = T)
+                n.crossover <- gen.n.crossover(n.chr, lambda = 0.56)
+                xo.positions.list <- rep(foo, n.chr)
+                xo.strands.list <- rep(foo, n.chr)
+                for(j in 1:n.chr) {
+                    xo.positions.list[[j]] <- sort(runif(n.crossover[j], min = 0, max = 1))
+                    xo.strands.list[[j]] <- sample(c(1,2,3,4), size = n.crossover[j], replace = T)
+                }
+                #Resolving crossovers and perform meiotic divisions
+                linkage.gamete2 <- resolve.crossovers(meiocyte = linkage.gamete2, xo.positions.list, xo.strands.list, strand.mat, n.chr, n.crossover)
+                gamete2 <- make.gamete(linkage.gamete2)
+                } #Done making gametes
+
+                #Union of gametes, aka fertilization <3
+                ind.mat.new[[n]][1,] <- gamete1
+                ind.mat.new[[n]][2,] <- gamete2
+                n <- n + 1 #update counter        
+            } #Close looping over all offspring of one parent
+    } #Close looping over all parents, #No individuals produced
+        
+    return(ind.mat.new)
+}
+####################################################################
+
+#Helper function, pick parents
+my.sample.parents <- function(x, Nind, No, ind.W) { c(x, sample((1:Nind)[-x], size = No[x], prob = ind.W[-x])) }
+
 
 
 #####################################################################################################
@@ -375,6 +461,11 @@ make.gamete <- function(linkage.gamete) {
     gamete <- lapply(lapply(linkage.gamete, mydrop), mysample) #Using list apply
     return(unlist(gamete))
 }
+
+#Functions for picking crossover positions and strands
+my.xo.positions <- function(n.crossover) { sort(runif(n.crossover, min = 0, max = 1)) }
+my.xo.strands <- function(n.crossover) { sample(c(1,2,3,4), size = n.crossover, replace = T) }
+
 
 ##################################################################################################
 
@@ -643,13 +734,19 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
             No <- rpois(n = N, lambda = B*ind.W)
             #If number of offspring larger than K, remove some offspring randomly
             if(sum(No) > K) {
-                while(sum(No) > K) { #Remove individuals until only K are left, seems slow...
+                while(sum(No) > K) { #Remove individuals until only K are left
+                    No.rem <- sum(No) - K
                     no.ind <- (1:length(No))[No > 0] #Indexes of cases where No > 0
-                    rem.ind <- sample(no.ind, 1)
-                    No[rem.ind] <- No[rem.ind] - 1
+                    if(No.rem < length(no.ind)) {   
+                        rem.ind <- sample(no.ind, No.rem, replace = FALSE)
+                        No[rem.ind] <- No[rem.ind] - 1
+                    }
+                    if(No.rem >= length(no.ind)) {
+                        No[no.ind] <- No[no.ind] - 1
+                    }
                 }
             }
-            ind.mat <- produce.gametes.W.No(ind.mat, loc.mat, No, ind.W, link.map = T, linkage, nloc.chr, n.chr)
+            ind.mat <- produce.gametes.faster(ind.mat, loc.mat, No, ind.W, link.map = T, linkage, nloc.chr, n.chr)
         }
         
         #Next generation
@@ -908,13 +1005,19 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
             No <- rpois(n = N, lambda = B*ind.W)
             #If number of offspring larger than K, remove some offspring randomly
             if(sum(No) > K) {
-                while(sum(No) > K) { #Remove individuals until only K are left, seems slow...
+                while(sum(No) > K) { #Remove individuals until only K are left
+                    No.rem <- sum(No) - K
                     no.ind <- (1:length(No))[No > 0] #Indexes of cases where No > 0
-                    rem.ind <- sample(no.ind, 1)
-                    No[rem.ind] <- No[rem.ind] - 1
+                    if(No.rem < length(no.ind)) {   
+                        rem.ind <- sample(no.ind, No.rem, replace = FALSE)
+                        No[rem.ind] <- No[rem.ind] - 1
+                    }
+                    if(No.rem >= length(no.ind)) {
+                        No[no.ind] <- No[no.ind] - 1
+                    }
                 }
             }
-            ind.mat <- produce.gametes.W.No(ind.mat, loc.mat, No, ind.W, link.map = T, linkage, nloc.chr, n.chr)
+            ind.mat <- produce.gametes.faster(ind.mat, loc.mat, No, ind.W, link.map = T, linkage, nloc.chr, n.chr)
         }
         
         #Next generation
