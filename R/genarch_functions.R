@@ -571,11 +571,11 @@ calc.Ne <- function(af1, af2, N1, N2, nloc, t) {
     }
 
 #Calculate fitness effects of deleterious mutations
-delres.fitness <- function(ind.mat, delres.ind, nloc) {
+delres.fitness <- function(ind.mat, delres.ind, nloc, delres.h) {
     mydselect <- function(x, delres.ind, nloc) {x[1:2, (1:nloc %in% delres.ind)]}
     ind.mat <- lapply(ind.mat, mydselect, delres.ind, nloc) #Select only deleterious recessives
     ##Check that both alleles are different from zero, return the smallest value if true, 0 if false
-    delres.check <- function(ind.mat) { ifelse(all(ind.mat != 0), min(ind.mat), 0) }
+    delres.check <- function(ind.mat) { ifelse(all(ind.mat == 0), 0, ifelse(all(ind.mat != 0), max(ind.mat), delres.h*max(ind.mat))) }
     delres.check2 <- function(ind.mat) { apply(ind.mat, MARGIN = 2, delres.check) }
     delr.mat <- lapply(ind.mat, delres.check2) #Check all genotypes
     ##Calculate effect on fitness for each ind, effects are multiplicative
@@ -583,7 +583,13 @@ delres.fitness <- function(ind.mat, delres.ind, nloc) {
     delr.vec <- as.vector(unlist(lapply(delr.mat, delres.ef))) #Calculate effects on fitness
     return(delr.vec) 
 }
- 
+
+
+
+#Old delres.check function, did not take possible partial recessivity into account
+#New function does this with the delres.h parameter
+#delres.check <- function(ind.mat) { ifelse(all(ind.mat != 0), min(ind.mat), 0) }
+
 #################################################################
 
 #The string #' indicates roxygen parsing
@@ -615,8 +621,9 @@ delres.fitness <- function(ind.mat, delres.ind, nloc) {
 #' @param n.neutral Number of neutral loci, defaults to 0
 #' @param linkage.map If map distances are determined randomly, set this to "random", if fixed linkage map is provided can set this to "user"
 #' @param linkage Matrix of 3 rows and nloc columns, first two rows can be zeros and third row determines map distances relative to chromosome coordinates from 0 to 1
+#' @param save.all whether genotypes should be saved in each generation?
 #' @export
-indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, density.reg, allele.model, mu.qtl, mu.delres = 0, mu.neutral = 0, n.chr, nloc.chr, nqtl, n.delres = 0, n.neutral = 0, linkage.map = "random", linkage = NULL) {
+indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, density.reg, allele.model, mu.qtl, mu.delres = 0, mu.neutral = 0, n.chr, nloc.chr, nqtl, n.delres = 0, n.neutral = 0, linkage.map = "random", linkage = NULL, save.all = FALSE) {
 
     #Prepare linkage groups
     foo <- list(0)
@@ -694,7 +701,11 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
 
     ind.mat <- initialise.ind.mat(ind.mat, genotype.mat, N, nloc) #Sample starting genotypes
 
-
+    #initialize list of storing all genotypes, if needed
+    if(save.all == TRUE) {
+        all.genotypes <- rep(foo, generations)
+    }
+    
     #Loop over generations
     for(g in 1:generations) {
 
@@ -704,7 +715,10 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
         #Calculate allele frequencies
         results.mat.alleles[g,2:(nloc+1)] <- calc.al.freq(ind.mat, length(ind.mat), nloc, allele.model, loc.attributes)
 
-        
+        ##If need to save genotypes do it here
+        if(save.all == TRUE) {
+            all.genotypes[[g]] <- ind.mat
+        }
 
         #Argument type needs to have value of either "biallelic" or "infinite"
         ind.G <- calc.genot.effects(ind.mat, ae, type = allele.model, qtl.ind, nloc) #Calculate genotype effects
@@ -800,8 +814,14 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
 
     #Modify results matrices if necessary
 
+    if(save.all == TRUE) {
+        return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = all.genotypes, "loci" = loc.attributes))
+    }
+
     #Return results
-    return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes))
+    if(save.all == FALSE) {
+        return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes))
+    }
 }
 
 ###########################################
