@@ -619,11 +619,12 @@ delres.fitness <- function(ind.mat, delres.ind, nloc, delres.h) {
 #' @param nloc.chr Vector of the length of n.chr giving number of loci for each chromosome
 #' @param n.delres Number of deleterious recessives, defaults to 0
 #' @param n.neutral Number of neutral loci, defaults to 0
+#' @param delres.h Dominance coefficient of deleterious mutations
 #' @param linkage.map If map distances are determined randomly, set this to "random", if fixed linkage map is provided can set this to "user"
 #' @param linkage Matrix of 3 rows and nloc columns, first two rows can be zeros and third row determines map distances relative to chromosome coordinates from 0 to 1
 #' @param save.all whether genotypes should be saved in each generation?
 #' @export
-indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, density.reg, allele.model, mu.qtl, mu.delres = 0, mu.neutral = 0, n.chr, nloc.chr, nqtl, n.delres = 0, n.neutral = 0, linkage.map = "random", linkage = NULL, save.all = FALSE) {
+indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, density.reg, allele.model, mu.qtl, mu.delres = 0, mu.neutral = 0, n.chr, nloc.chr, nqtl, n.delres = 0, n.neutral = 0, delres.h = 0.25, linkage.map = "random", linkage = NULL, save.all = FALSE) {
 
     #Prepare linkage groups
     foo <- list(0)
@@ -739,7 +740,7 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
         ind.W <- calc.fitness(ind.P, opt.pheno[g], sel.intensity)
         if(n.delres > 0) {
             #Calculate fitness effects of deleterious recessives
-            ind.W <- ind.W*delres.fitness(ind.mat, delres.ind, nloc)
+            ind.W <- ind.W*delres.fitness(ind.mat, delres.ind, nloc, delres.h)
         }
         
 
@@ -1244,6 +1245,44 @@ plot_reaction.norm <- function(data) {
 
 
 ################################################################
+
+##################################################################
+###         Popgen summary stats calculations                  ###
+##################################################################
+
+### Heterozygosity calculations
+
+#Function to check whether a locus is heterozygous (works with infinite alleles model)
+is.het <- function(ind.mat) {
+   tol <- .Machine$double.eps^0.5
+   return(abs(ind.mat[1] - ind.mat[2]) >= tol) }
+
+##This function calculates heterozygosity for all loci (can be selected) and all individuals
+## H = 1/NL sum_{i=1}^{N} sum_{j=1}^{L} H_{ij}
+## where N = number of inds., L = number of loci, H_ij = whether ind i at locus j is het? 1 or 0
+#'Calculate heterozygosity for selected loci and all individuals
+#' @param ind.mat a list of individuals (genotypes) used in the calculation
+#' @param loc.ind indexes of those loci used in the calculation
+#' @param nloc The total number of loci used in the whole simulation
+#' @export
+het.calc <- function(ind.mat, loc.ind, nloc) {
+   mydselect <- function(x, loc.ind, nloc) {x[1:2, (1:nloc %in% loc.ind)]}
+   ind.mat <- lapply(ind.mat, mydselect, loc.ind, nloc) #Select only particular loci
+####
+   current.n <- length(ind.mat) #Number of individuals
+   current.nloc <- dim(ind.mat[[1]])[2] #Number of loci in current selection
+####
+   calc.het.loci <- function(x) { sum(apply(x, 2, is.het)) }
+####
+   hets <- lapply(ind.mat, calc.het.loci)
+####
+   het.obs <- (1/(current.n*current.nloc))*sum(unlist(hets))
+####
+return(het.obs)
+##
+}
+
+#####################################################################33
 
 ###########################################################
 # Generating different colours of environmental variation #
