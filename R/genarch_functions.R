@@ -592,6 +592,46 @@ delres.fitness <- function(ind.mat, delres.ind, nloc, delres.h) {
 
 #################################################################
 
+
+##Function to save and load genotypes to a text file
+save.genotypes <- function(ind.mat, nloci, parname, generation, ID ) {
+
+    dirname <- paste("par_", parname, "/ID_", ID, sep = "") #Name of directory
+    #Then create a directory if it does not exist
+    if(!dir.exists(dirname)) { dir.create(dirname, recursive = TRUE) }
+    filename <- paste("gen_", generation, sep = "")
+    finalname <- paste(dirname, "/", filename, ".csv", sep = "")
+    lapply(ind.mat, write, finalname, append = TRUE, ncolumns = 2*nloci)
+
+}
+
+##Function to load genotypes from text file, that was generated using "save.genotypes"
+load.genotypes <- function(filename, nloci) {
+    conn <- file(filename, open = "r")
+    linn <- readLines(conn)
+
+    #Converting from character format to numeric
+    tokens <- strsplit(linn, split = " ")
+    myconvert <- function(x, nloci) { matrix(as.numeric(x), ncol = nloci) }
+    genotypes <- lapply(tokens, myconvert, nloci = nloci)
+
+    return(genotypes)
+}
+
+##Function to load loci attributes
+load.loc.attributes <- function(file) {
+
+    loc.attributes <- scan(file, what = "char", nlines = 1) #Read loci types
+    n.chr <- scan(file, nlines = 1, skip = 1) #Read number of chromosomes
+    nloc.chr <- scan(file, nlines = n.chr, skip = 2) #Read n.loci per chromosome
+    linkage <- rep(list(0), n.chr) #initialize linkage map
+    #Then read map positions chr by chr
+    for(i in 1:n.chr) { linkage[[i]] <- scan(file, nlines = 1, skip = (2 + n.chr + i -1)) }
+
+    return(list("loci" = loc.attributes, "n.chr" = n.chr, "nloc.chr" = nloc.chr, "linkage" = linkage))
+}
+    
+
 #The string #' indicates roxygen parsing
 
 #### Wrapper function for the whole simulation
@@ -623,8 +663,9 @@ delres.fitness <- function(ind.mat, delres.ind, nloc, delres.h) {
 #' @param linkage.map If map distances are determined randomly, set this to "random", if fixed linkage map is provided can set this to "user"
 #' @param linkage Matrix of 3 rows and nloc columns, first two rows can be zeros and third row determines map distances relative to chromosome coordinates from 0 to 1
 #' @param save.all whether genotypes should be saved in each generation?
+#' @param parname name of the parameter set used in saving the genotype files
 #' @export
-indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, density.reg, allele.model, mu.qtl, mu.delres = 0, mu.neutral = 0, n.chr, nloc.chr, nqtl, n.delres = 0, n.neutral = 0, delres.h = 0.25, linkage.map = "random", linkage = NULL, save.all = FALSE) {
+indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, density.reg, allele.model, mu.qtl, mu.delres = 0, mu.neutral = 0, n.chr, nloc.chr, nqtl, n.delres = 0, n.neutral = 0, delres.h = 0.25, linkage.map = "random", linkage = NULL, save.all = FALSE, parname = NULL) {
 
     #Prepare linkage groups
     foo <- list(0)
@@ -702,9 +743,20 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
 
     ind.mat <- initialise.ind.mat(ind.mat, genotype.mat, N, nloc) #Sample starting genotypes
 
-    #initialize list of storing all genotypes, if needed
+    ### If all genotypes need to be saved, initialize ID and save loci attributes and linkage map
+    #When running multiple parallel simulations this is needed so different runs are saved separately
+    #
     if(save.all == TRUE) {
-        all.genotypes <- rep(foo, generations)
+        ##Generate a random run ID
+        ID <- substr(as.character(runif(1,1,9)), 3, 10)
+        #Saving the loc.attributes information
+        dirname <- paste("par_", parname, "/ID_", ID, sep = "") #Directory
+        if(!dir.exists(dirname)) { dir.create(dirname, recursive = TRUE) }
+        filename <- "locattr"
+        finalname <- paste(dirname, "/", filename, ".txt", sep = "")
+        write(loc.attributes, file = finalname, append = TRUE, ncolumns = nloc) #Save loci attributes
+        write(c(n.chr, nloc.chr), file = finalname, append = TRUE, ncolumns = 1) #Save n chr
+        for(i in 1:n.chr) { write(linkage[[i]][3,], file = finalname, append = TRUE, ncolumns = nloc.chr[i]) } #save map positions for each locus in each chromosome
     }
     
     #Loop over generations
@@ -716,9 +768,9 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
         #Calculate allele frequencies
         results.mat.alleles[g,2:(nloc+1)] <- calc.al.freq(ind.mat, length(ind.mat), nloc, allele.model, loc.attributes)
 
-        ##If need to save genotypes do it here
+        ### If need to save genotypes do it here ###
         if(save.all == TRUE) {
-            all.genotypes[[g]] <- ind.mat
+            save.genotypes(ind.mat, nloci = nloc, parname = parname, generation = g, ID = ID)
         }
 
         #Argument type needs to have value of either "biallelic" or "infinite"
@@ -815,14 +867,14 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
 
     #Modify results matrices if necessary
 
-    if(save.all == TRUE) {
-        return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = all.genotypes, "loci" = loc.attributes))
-    }
+#    if(save.all == TRUE) {
+#        return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = #all.genotypes, "loci" = loc.attributes))
+#    }
 
     #Return results
-    if(save.all == FALSE) {
+#    if(save.all == FALSE) {
         return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes))
-    }
+#    }
 }
 
 ###########################################

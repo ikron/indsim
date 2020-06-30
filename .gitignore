@@ -6,3 +6,5 @@ genarch.*
 .Rhistory
 cluster/*
 Checklist.org
+par_set1/*
+*.Rdata
