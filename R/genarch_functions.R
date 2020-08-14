@@ -487,9 +487,9 @@ gen.mutations.loc <- function(x, N) {
         }
 
 #This function makes mutations with the infinite alleles model
-mutate.inf.alleles <- function(x, l) {
+mutate.inf.alleles <- function(x, l, sigma.a) {
     mut.al.ind <- sample(c(1,2),1)
-    x[mut.al.ind,l] <- rnorm(1, mean = 0, sd = 1) #This may need to changed accordingly
+    x[mut.al.ind,l] <- rnorm(1, mean = 0, sd = sigma.a) #This may need to changed accordingly
     return(x)
 }
 
@@ -609,7 +609,9 @@ save.genotypes <- function(ind.mat, nloci, parname, generation, ID ) {
 load.genotypes <- function(filename, nloci) {
     conn <- file(filename, open = "r")
     linn <- readLines(conn)
-
+    #Need to close connection
+    close(conn)
+    
     #Converting from character format to numeric
     tokens <- strsplit(linn, split = " ")
     myconvert <- function(x, nloci) { matrix(as.numeric(x), ncol = nloci) }
@@ -621,12 +623,12 @@ load.genotypes <- function(filename, nloci) {
 ##Function to load loci attributes
 load.loc.attributes <- function(file) {
 
-    loc.attributes <- scan(file, what = "char", nlines = 1) #Read loci types
-    n.chr <- scan(file, nlines = 1, skip = 1) #Read number of chromosomes
-    nloc.chr <- scan(file, nlines = n.chr, skip = 2) #Read n.loci per chromosome
+    loc.attributes <- scan(file, what = "char", nlines = 1, quiet = T) #Read loci types
+    n.chr <- scan(file, nlines = 1, skip = 1, quiet = T) #Read number of chromosomes
+    nloc.chr <- scan(file, nlines = n.chr, skip = 2, quiet = T) #Read n.loci per chromosome
     linkage <- rep(list(0), n.chr) #initialize linkage map
     #Then read map positions chr by chr
-    for(i in 1:n.chr) { linkage[[i]] <- scan(file, nlines = 1, skip = (2 + n.chr + i -1)) }
+    for(i in 1:n.chr) { linkage[[i]] <- scan(file, nlines = 1, skip = (2 + n.chr + i -1), quiet = T) }
 
     return(list("loci" = loc.attributes, "n.chr" = n.chr, "nloc.chr" = nloc.chr, "linkage" = linkage))
 }
@@ -655,6 +657,7 @@ load.loc.attributes <- function(file) {
 #' @param mu.qtl Mutation rate for qtl loci
 #' @param mu.delres Mutation rate for deleterious recessives
 #' @param mu.neutral Mutation rate for neutral loci
+#' @param sigma.a Standard deviation of mutational effects
 #' @param n.chr Number of chromosomes (linkage groups)
 #' @param nloc.chr Vector of the length of n.chr giving number of loci for each chromosome
 #' @param n.delres Number of deleterious recessives, defaults to 0
@@ -665,7 +668,7 @@ load.loc.attributes <- function(file) {
 #' @param save.all whether genotypes should be saved in each generation?
 #' @param parname name of the parameter set used in saving the genotype files
 #' @export
-indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, density.reg, allele.model, mu.qtl, mu.delres = 0, mu.neutral = 0, n.chr, nloc.chr, nqtl, n.delres = 0, n.neutral = 0, delres.h = 0.25, linkage.map = "random", linkage = NULL, save.all = FALSE, parname = NULL) {
+indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, density.reg, allele.model, mu.qtl, mu.delres = 0, mu.neutral = 0, sigma.a = 1, n.chr, nloc.chr, nqtl, n.delres = 0, n.neutral = 0, delres.h = 0.25, linkage.map = "random", linkage = NULL, save.all = FALSE, parname = NULL) {
 
     #Prepare linkage groups
     foo <- list(0)
@@ -850,7 +853,7 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
                 }
                 if(allele.model == "infinite") {
                    if(loc.attributes[l] == "qtl") {
-                       mut.ind <- lapply(mut.ind, mutate.inf.alleles, l = l) }
+                       mut.ind <- lapply(mut.ind, mutate.inf.alleles, l = l, sigma.a = sigma.a) }
                    if(loc.attributes[l] == "delres") {
                        mut.ind <- lapply(mut.ind, mutate.delres.alleles, l = l) }
                    if(loc.attributes[l] == "neutral") {   
@@ -914,6 +917,7 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
 #' @param ntql.hed Number of loci affecting phenotype (bethedging)
 #' @param nqtl.epi Number of loci affecting phenotype (probability of epigenetic modification)
 #' @param mu Mutation rate, which currently is the same for all loci
+#' @param sigma.a Standard deviation of mutational effects
 #' @param n.chr Number of chromosomes (linkage groups)
 #' @param nloc.chr Vector of the length of n.chr giving number of loci for each chromosome
 #' @param n.neutral Number of neutral loci, defaults to 0
@@ -922,9 +926,33 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
 #' @param kd Fitness cost of developmental plasticity
 #' @param ka Fitness cost of reversible plasticity
 #' @param ke Fitness cost of epigenetic adjustment
+#' @param sensitivity Whether to draw random parameter values for sensitivity analysis
 #' @export
-indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, R, P, density.reg, allele.model, mu, n.chr, nloc.chr, nqtl, nqtl.slope, nqtl.adj, nqtl.hed, nqtl.epi, n.neutral = 0, linkage.map = "random", linkage = NULL, kd, ka, ke) {
+indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, R, P, density.reg, allele.model, mu, sigma.a = 1, n.chr, nloc.chr, nqtl, nqtl.slope, nqtl.adj, nqtl.hed, nqtl.epi, n.neutral = 0, linkage.map = "random", linkage = NULL, kd, ka, ke, sensitivity = FALSE) {
 
+    #If using sensitivity analysis draw new random values for some parameters
+    if(sensitivity == TRUE) {
+        ################################################################
+        ### Getting random parameter values for sensitivity analysis ###
+        ################################################################
+        #sel.intensity <- runif(1, min = 0.01, max = 1)
+        sigma.e <- runif(1, min = 0.01, max = 0.5)
+        mu <- 10^runif(1, min = -6, max = -3)
+        n.chr <- sample(c(1:10), 1)
+        nqtl <- sample(c(4:25), 1) #Sampling number of loci from 4 to 25
+        nqtl.slope <- sample(c(4:25), 1)
+        nqtl.adj <- sample(c(4:25), 1)
+        nqtl.hed <- sample(c(4:25), 1)
+        nqtl.epi <- sample(c(4:25), 1)
+        #Calculating number of loci per chromosome
+        perlocus <- (nqtl+nqtl.slope+nqtl.adj+nqtl.hed+nqtl.epi)%/%n.chr #Integer division
+        nloc.chr <- rep(perlocus, n.chr)
+        nloc.chr[1] <- nloc.chr[1] + (nqtl+nqtl.slope+nqtl.adj+nqtl.hed+nqtl.epi)%%n.chr #Add remainder to chr 1
+        sigma.a <- runif(1, min = 0.01, max = 2)
+        ################################################################
+    }
+    
+    
     #Initialize time
     timesteps <- generations*L #There are ngenerations*L time steps in the model
     t <- 1:timesteps
@@ -1007,7 +1035,7 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
     for(g in 1:generations) {
 
         #Check for extinction
-        if(N < 2) {stop("Population went extinct! : (")}
+        if(N < 2) {return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes))}
 
         #Calculate allele frequencies
         #Removing epigenetic marks for allelic effect calculation
@@ -1130,7 +1158,7 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
                 }
                 if(allele.model == "infinite") {
                     if(loc.attributes[l] == "qtl" | loc.attributes[l] == "qtl.slope" | loc.attributes[l] == "qtl.adj" | loc.attributes[l] == "qtl.hed" | loc.attributes[l] == "qtl.epi") {
-                        mut.ind <- lapply(mut.ind, mutate.inf.alleles, l = l) } else {
+                        mut.ind <- lapply(mut.ind, mutate.inf.alleles, l = l, sigma.a = sigma.a) } else {
                             mut.ind <- lapply(mut.ind, mutate.K.alleles, l = l, alleles = alleles) }
                 }
                 ind.mat[mutations[[l]] == 1] <- mut.ind #Store results
@@ -1185,6 +1213,51 @@ plot_sim.results <- function(data) {
 
 }
 
+
+#' Plot phenotype mean
+#'
+#' This function plots population mean from the simulation
+#' @param data Phenotypic result matrix from simulation
+#' @export
+plot_sim.trait <- function(data) {
+    ggplot2::ggplot(data.frame(data), aes(x = generation, y = pop.mean)) +
+        ggplot2::geom_line() +
+        ggplot2::ylab(label = "Mean phenotype") +
+        ggplot2::xlab("Generation")
+}
+
+#' Plot mean fitness
+#'
+#' This function plots population mean fitness from the simulation
+#' @param data Phenotypic results matrix from simulation
+#' @export
+plot_sim.fitness <- function(data) {
+    ggplot2::ggplot(data.frame(data), aes(x = generation, y = W.mean)) +
+        ggplot2::geom_line() +
+        ggplot2::ylab(label = "W") +
+        ggplot2::xlab("Generation") +    
+        ggplot2::scale_y_continuous(limits = c(0,1), expand = c(0,0))
+}
+
+#' Plot genotypic values
+#'
+#' This function plots genotypic values of intercept, slope, adjustment, epigenetic mod and bethedging probabilities
+#' @param data Phenotypic results matrix from simulation
+#' @export
+plot_sim.genotypicval <- function(data) {
+    data <- data.frame(data[,-c(2:5)]) #Drop columns that are not needed
+    data <- tidyr::gather(data, type, genoval, G.int:G.epi, factor_key = TRUE) #Change to long format
+    mycolors <- c("#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00")
+    
+    ggplot2::ggplot(data, aes(x = generation, y = genoval, color = type)) +
+        ggplot2::geom_line() +
+        ggplot2::ylab("Genotypic value") +
+        ggplot2::xlab("Generation") +
+        ggplot2::scale_color_manual(values = mycolors, labels = c("Intercept", "Slope", "Plastic\nadjustment", "Developmental\nvariation", "Epigenetic\nmodification")) +
+        ggplot2::theme(legend.key.size = unit(2.5, 'lines'))
+}
+
+
 #This function plots an overview of allele frequency changes
 #' Plot allele frequency results
 #'
@@ -1201,13 +1274,14 @@ plot_allele.results <- function(data, nloc, loc.attr) {
     data.long <- reshape2::melt(data, id.vars = c("generation"), measure.vars = c(paste(rep("locus", nloc), 1:nloc, sep = "")), variable.name = "locus", value.name = "freq")
     type.indices <- as.numeric(data.long$locus) #Since loci are in order this is OK
     data.long$loctype <- loc.attr[type.indices]
+    mycolors <- c("#e41a1c",  "#4daf4a", "#ff7f00", "#984ea3",  "#377eb8")
 
     ggplot2::ggplot(data.long, aes(x = generation, y = freq, group = locus, colour = loctype)) +
         ggplot2::geom_line() +
         ggplot2::xlab("Generation") +
         ggplot2::ylab("Allele frequency") +
-        ggplot2::scale_y_continuous(limits = c(0,1), expand = c(0,0))
-
+        ggplot2::scale_y_continuous(limits = c(0,1), expand = c(0,0)) +
+        ggplot2::scale_color_manual(values = mycolors, labels = c("Intercept", "Plastic\nadjustment", "Epigenetic\nmodification", "Developmental\nvariation",  "Slope"))  
 }
             
 #This function plots an overview of alleles present in the population
