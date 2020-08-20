@@ -1035,7 +1035,7 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
     for(g in 1:generations) {
 
         #Check for extinction
-        if(N < 2) {return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes))}
+        if(N < 2) {return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes, "linkagemap" = linkage))}
 
         #Calculate allele frequencies
         #Removing epigenetic marks for allelic effect calculation
@@ -1172,12 +1172,314 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
     #Modify results matrices if necessary
 
     #Return results
-    return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes))
+    return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes, "linkagemap" = linkage))
     
 }
 ################################################################################################
 ###                      End of plasticity simulations                                       ###
 ################################################################################################
+
+###Simulations where simulation is started with existing genotypes
+#' Simulations with plasticity using starting genotypes
+#'
+#' This function performs simulations with plasticity and epigenetic effects in fluctuating environments. Using starting genotypes
+#'
+#'
+#' @param N Starting population size
+#' @param generations Number of generations to run the simulations
+#' @param L Number of timesteps in each generation
+#' @param sel.intensity Selection intensity for stabilising selection
+#' @param init.f Initial allele frequencies for QTL
+#' @param init.n Initial allele frequencies for neutral loci
+#' @param sigma.e Environmental standard deviations of the phenotypic trait
+#' @param K Carrying capacity of the population
+#' @param density.reg How population density is regulated. Currently there are two possible values:  "logistic" which implements logistic population density regulation (see manual) and "sugar" which constrains population to carrying capacity by randomly removing individuals when population size is higher than K
+#' @param r If density regulation is "logistic", this is the population growth rate.
+#' @param B If density regulation is "sugar", this it the mean number of offspring each perfectly adapted individual has
+#' @param R Old rate of environmental change relative to generation time
+#' @param P Old predictability of the environment
+#' @param allele.model Which allele model to use for qtl. Currently the options are: "infinite" which uses an infinite alleles model for qtl, and "biallelic" which uses a biallelic model for qtl
+#' @param mu Mutation rate, which currently is the same for all loci
+#' @param sigma.a Standard deviation of mutational effects
+#' @param n.neutral Number of neutral loci, defaults to 0
+#' @param linkage.map If map distances are determined randomly, set this to "random", if fixed linkage map is provided can set this to "user"
+#' @param linkage Matrix of 3 rows and nloc columns, first two rows can be zeros and third row determines map distances relative to chromosome coordinates from 0 to 1
+#' @param kd Fitness cost of developmental plasticity
+#' @param ka Fitness cost of reversible plasticity
+#' @param ke Fitness cost of epigenetic adjustment
+#' @param sensitivity Whether to draw random parameter values for sensitivity analysis
+#' @param ind.mat List of the genotypes from a previous simulation
+#' @param newR New rate of environmental change
+#' @param newP New predictability of the environment
+#' @param changepoint Time point at which parameters change
+#' @param loci Loci attributes of the previous simulation
+#' @export
+indsim.plasticity.startgenot.simulate <- function(N, generations, L, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, R, P, density.reg, allele.model, mu, sigma.a = 1, n.chr = 0, nloc.chr = 0, nqtl = 0, nqtl.slope = 0, nqtl.adj = 0, nqtl.hed = 0, nqtl.epi = 0, n.neutral = 0, linkage.map = "user", linkage = NULL, kd, ka, ke, sensitivity = FALSE, ind.mat, newR, newP, changepoint, loci) {
+
+    #If using sensitivity analysis draw new random values for some parameters
+    if(sensitivity == TRUE) {
+        ################################################################
+        ### Getting random parameter values for sensitivity analysis ###
+        ################################################################
+        #sel.intensity <- runif(1, min = 0.01, max = 1)
+        sigma.e <- runif(1, min = 0.01, max = 0.5)
+        mu <- 10^runif(1, min = -6, max = -3)
+        n.chr <- sample(c(1:10), 1)
+        nqtl <- sample(c(4:25), 1) #Sampling number of loci from 4 to 25
+        nqtl.slope <- sample(c(4:25), 1)
+        nqtl.adj <- sample(c(4:25), 1)
+        nqtl.hed <- sample(c(4:25), 1)
+        nqtl.epi <- sample(c(4:25), 1)
+        #Calculating number of loci per chromosome
+        perlocus <- (nqtl+nqtl.slope+nqtl.adj+nqtl.hed+nqtl.epi)%/%n.chr #Integer division
+        nloc.chr <- rep(perlocus, n.chr)
+        nloc.chr[1] <- nloc.chr[1] + (nqtl+nqtl.slope+nqtl.adj+nqtl.hed+nqtl.epi)%%n.chr #Add remainder to chr 1
+        sigma.a <- runif(1, min = 0.01, max = 2)
+        ################################################################
+    }
+    
+    
+    #Initialize time
+    timesteps <- generations*L #There are ngenerations*L time steps in the model
+    t <- 1:timesteps
+    E <- rep(0, timesteps) #Initialize the environment
+    cues <- rep(0, timesteps) #Initialize the environmental cues
+
+    E[1:changepoint] <- sin((2*pi*t[1:changepoint])/(L*R)) #Initialize the environment
+    E[(changepoint+1):timesteps] <- sin((2*pi*t[(changepoint+1):timesteps])/(L*newR))
+    cues[1:changepoint] <- rnorm(n = changepoint, mean = E[1:changepoint]*P, sd = (1-P)/3) #Environmental cues
+    cues[(changepoint+1):timesteps] <- rnorm(n = (timesteps - changepoint), mean = E[(changepoint+1):timesteps]*newP, sd = (1-newP)/3)
+    
+    #Prepare linkage groups and locus information
+    loc.attributes <- loci #Types for all loci and their order
+    foo <- list(0)
+    nloc <- length(loc.attributes)
+    nqtl <- sum(loc.attributes == "qtl")
+    nqtl.slope <- sum(loc.attributes == "qtl.slope")
+    nqtl.adj <- sum(loc.attributes == "qtl.adj")
+    nqtl.hed <- sum(loc.attributes == "qtl.hed")
+    nqtl.epi <- sum(loc.attributes == "qtl.epi")
+    
+    #Setup linkage map
+    if(linkage.map == "random") {
+        linkage <- rep(foo, n.chr)
+        for(i in 1:n.chr) {
+            linkage[[i]] <- matrix(rep(0,3*nloc.chr[i]), ncol = nloc.chr[i])
+            linkage[[i]][3,] <- sort(runif(nloc.chr[i])) #Map-positions for each locus
+        }
+    }
+
+    n.chr <- length(linkage)
+    nloc.chr <- unlist(lapply(linkage, ncol)) #Number of loci per chromosome
+
+    #Perform some checks that initial parameters are sensible
+    if(nloc != sum(nloc.chr)) { stop("Number of loci and loci per chromosome don't match!") }
+
+    
+    qtl.ind <- (1:nloc)[loc.attributes == "qtl"] #Indices of loci that affect the phenotype (via intercept)
+    qtl.slope.ind <- (1:nloc)[loc.attributes == "qtl.slope"] #Indices for loci that affect the phenotype (via reaction norm slope)
+    qtl.adj.ind <- (1:nloc)[loc.attributes == "qtl.adj"] #Indices for loci for plasticity adjustment
+    qtl.hed.ind <- (1:nloc)[loc.attributes == "qtl.hed"] #Indices for loci for canalization / hedging
+    qtl.epi.ind <- (1:nloc)[loc.attributes == "qtl.epi"] #Indices for loci for epigenetic modification
+
+    alleles <- rep(list(c(0,1)), nloc) #Alleles for all except qtl
+    
+    if(allele.model == "biallelic") { #Setup biallelic effects
+        #alleles <- rep(list(c(0,1)), nloc) #All loci biallelic
+        q <- (1:(nqtl+1)/(nqtl+1))[-(nqtl+1)]
+        ae <- qnorm(q, mean = 0, sd = 1) #Allelic effects are distributed normally
+        #ae <- dnorm(seq(from = -5, to = -1, length.out = nloc), mean = 0, sd = 1)*10
+        ae <- sample(ae, length(ae)) #Randomize allelic effects among loci
+        temp <- rep(0,nloc)
+        temp[qtl.ind] <- ae
+        ae <- temp }
+
+    
+
+    #Simulation with logistic population regulation and natural selection
+
+    #Initialize the results matrix
+    #We want to monitor phenotypes, allele freqs, heritabilities, variances etc. etc.
+    #Monitoring also population mean intercept and slope (at genotypic values)
+    results.mat.pheno <- matrix(rep(0, generations*10), ncol = 10)
+    colnames(results.mat.pheno) <- c("generation", "pop.mean", "var.a", "W.mean", "N", "G.int", "G.slope", "G.adj", "G.hed", "G.epi")
+    results.mat.pheno[,1] <- 1:generations #Store generation numbers
+
+    results.mat.alleles <- matrix(rep(0, generations*(nloc+1)), ncol = nloc+1)
+    results.mat.alleles[,1] <- 1:generations
+    colnames(results.mat.alleles) <- c("generation", c(paste(rep("locus", nloc), 1:nloc, sep = "")))
+
+    #Initilize the simulation
+    loc.mat <- matrix(rep(0,2*nloc), ncol = nloc)
+    #ind.mat <- rep(list("genotype" = loc.mat), N) #List for individuals
+
+    #Allele frequencies
+    #init.freq <- rep(init.f,nloc) #for p
+    #Here can also make explicit initial frequencies for qtls, delres and neutral markers
+    #if(n.neutral > 0) { init.freq[loc.attributes == "neutral"] <- init.n } #Neutral markers start at these frequencies
+
+    #Genotype frequencies
+    #genotype.mat <- matrix(rep(0,3*nloc), ncol = nloc)
+    #rownames(genotype.mat) <- c("AA", "Aa", "aa")
+
+    #Initialize genotype frequencies
+    #for(i in 1:nloc) {
+    #    genotype.mat[,i] <- HW.genot.freq(init.freq[i])
+    #}
+    #################################
+
+    #ind.mat <- initialise.ind.mat(ind.mat, genotype.mat, N, nloc) #Sample starting genotypes
+
+
+    
+    #Loop over generations
+    for(g in 1:generations) {
+
+        #Check for extinction
+        if(N < 2) {return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes, "linkagemap" = linkage))}
+
+        #Calculate allele frequencies
+        #Removing epigenetic marks for allelic effect calculation
+        results.mat.alleles[g,2:(nloc+1)] <- calc.al.freq(lapply(ind.mat, Re), length(ind.mat), nloc, allele.model, loc.attributes)
+
+        #Argument type needs to have value of either "biallelic" or "infinite"
+        #Calculate genotypic effects for intercept effects
+        ind.Ga <- calc.genot.effects(ind.mat, ae, type = allele.model, qtl.ind, nloc) #Calculate genotype effects
+        #Calculate genotypic effects for slope effects
+        ind.Gb <- calc.genot.effects(ind.mat, ae, type = allele.model, qtl.slope.ind, nloc)
+
+        ind.Gadj <- calc.genot.effects.lim(ind.mat, ae, type = allele.model, qtl.adj.ind, nloc, limits = c(0,1)) #Calculate genotype effects for plasticity adjustment
+        ind.Ghed <- calc.genot.effects.lim(ind.mat, ae, type = allele.model, qtl.hed.ind, nloc, limits = c(0,3)) #Calculate genotype effects for canalization / bet-hedging adjustment
+        ind.Gepi <- calc.genot.effects.lim(ind.mat, ae, type = allele.model, qtl.epi.ind, nloc, limits = c(0,1)) #Calculate genotype effects for epigenetic modification probability
+        
+        
+        #Calculate environmental effects
+        ind.E <- rnorm(n = N, mean = 0, sd = sigma.e + ind.Ghed) #Add sigma.e and bet-hedging effects
+
+        #Calculate phenotypes for the juvenile stage, using epigenetically marked slope loci
+        ind.Gepimod <- calc.genot.effects.epi(ind.mat, qtl.slope.ind, nloc)
+        ind.P <- ind.Ga + ind.Gepimod + ind.E
+
+        ##Environmental mismatches
+        ind.M <- matrix(rep(0, N*L), ncol = L) #Initialize mismatch matrix
+        ind.M[,1] <- abs(E[1 + L*(g-1)] - ind.P) #First env. mismatch
+
+        ##Epigenetic effects are reset
+        ind.mat <- reset.epigenetics(ind.mat)
+
+        ##Costs of plasticity
+        #Note! Using some thresholds for plasticity costs that is 0.05 below that there are no costs
+        ind.costs <- rep(0, N) #Initialize costs vector
+        
+        
+        #Calculate phenotypes for first adult stage (developmental plasticity happens)
+        ind.P <- ind.Ga + ind.Gb*cues[2 + L*(g-1)] + ind.E #First adult stage (development)
+
+        ind.M[,2] <- abs(E[2 + L*(g-1)] - ind.P) #Second env. mismatch
+        ind.costs <- ind.costs + ifelse(ind.Gb > 0.05 | ind.Gb < -0.05, kd, 0)
+        
+        #Loop over the rest life stages (phenotypic adjustment can happen)
+        for(j in 3:L) {
+            ind.adjustment <- rbinom(n = N, size = 1, prob = ind.Gadj) #Did adjustment happen
+            new.P <- ind.Ga + ind.Gb*cues[j + L*(g-1)] + ind.E #Calculate new phenotypes
+            ind.P[ind.adjustment == 1] <- new.P[ind.adjustment == 1] #Adjust phenotypes
+            ind.M[,j] <- abs(E[j + L*(g-1)] - ind.P) #Calculate next mismatch
+            ind.costs <- ind.costs + ifelse(ind.Gb > 0.05 | ind.Gb < -0.05, ka*ind.adjustment, 0) #Calculate costs
+        }
+
+        ### Modify loci epigenetically using the cue in the last life stage = L
+        epi.mod.ind <- rbinom(n = N, size = 1, prob = ind.Gepi) #Does epigenetic modification happen?
+        ind.mat <- epigenetic.modification(ind.mat, qtl.slope.ind, cues[5+L*(g-1)], epi.mod.ind)
+        #Costs of epigenetic modification
+        ind.costs <- ind.costs + ifelse(ind.Gepi > 0.05, ke*epi.mod.ind, 0)
+
+        #Store phenotypes
+        results.mat.pheno[g,2] <- mean(ind.P) #Population mean of trait in final life stage
+        results.mat.pheno[g,3] <- var(ind.Ga + ind.Gb) #Genetic variance
+        results.mat.pheno[g,6] <- mean(ind.Ga) #Mean intercept genotypic value
+        results.mat.pheno[g,7] <- mean(ind.Gb) #Mean slope genotypic value
+        results.mat.pheno[g,8] <- mean(ind.Gadj) #Mean plasticity adjustment genotypic value
+        results.mat.pheno[g,9] <- mean(ind.Ghed) #Mean bet-hedging genotypic value
+        results.mat.pheno[g,10] <- mean(ind.Gepi) #Mean epigenetic modification probability (gen.val.)
+        
+        
+        ##Calculate fitness over all life-stages, subtract costs of plasticity
+        ind.W <- exp(-sel.intensity * apply(ind.M, MARGIN = 1, sum)) - ind.costs
+        #Because costs can bring fitness below 0, all negative values are set to zero
+        ind.W <- replace(ind.W, ind.W < 0, 0) #Set negative values to 0
+
+        results.mat.pheno[g,4] <- mean(ind.W) #Population mean fitness
+        results.mat.pheno[g,5] <- N #Population size
+
+        ### Reproduction ###
+        #Using logistic density regulation
+        if(density.reg == "logistic") {
+            #Calculate the number of offspring the population produces
+            #Logistic population regulation
+            No <- round(N*K*(1+r) / (N*(1+r) - N + K)) #Logistic population growth
+            #Scale number of offspring by population mean fitness
+            No <- round(mean(ind.W)*No); if(No < 1) {stop("Population went extinct! : (")}
+            ind.mat <- produce.gametes.W(ind.mat, loc.mat, No, ind.W, link.map = T, linkage, nloc.chr, n.chr)
+        }
+
+        #Population regulation via Mikael's method
+        if(density.reg == "sugar") {
+            #Calculate the number of offspring that each individual produces
+            No <- rpois(n = N, lambda = B*ind.W)
+            #If number of offspring larger than K, remove some offspring randomly
+            if(sum(No) > K) {
+                while(sum(No) > K) { #Remove individuals until only K are left
+                    No.rem <- sum(No) - K
+                    no.ind <- (1:length(No))[No > 0] #Indexes of cases where No > 0
+                    if(No.rem < length(no.ind)) {   
+                        rem.ind <- sample(no.ind, No.rem, replace = FALSE)
+                        No[rem.ind] <- No[rem.ind] - 1
+                    }
+                    if(No.rem >= length(no.ind)) {
+                        No[no.ind] <- No[no.ind] - 1
+                    }
+                }
+            }
+            ind.mat <- produce.gametes.faster(ind.mat, loc.mat, No, ind.W, link.map = T, linkage, nloc.chr, n.chr)
+        }
+        
+        #Next generation
+        N <- length(ind.mat) #Store new population size
+
+         ### Mutation ###
+        #Produce mutations
+        mutations <- rep(foo, nloc)
+        #Has to be 2*mu since mutations happen on individual basis and each ind has 2 copies
+        mutations <- lapply(mutations, gen.mutations, N = N, mu = 2*mu) 
+        for(l in 1:nloc) { #Loop over all loci
+            if(any(mutations[[l]] == 1) == TRUE) { #Did any mutations happen?
+                mut.ind <- ind.mat[mutations[[l]] == 1] #Select individuals to be mutated
+                if(allele.model == "biallelic") { #Which alleles model is used?
+                    mut.ind <- lapply(mut.ind, mutate.K.alleles, l = l, alleles = alleles) #Mutate alleles
+                }
+                if(allele.model == "infinite") {
+                    if(loc.attributes[l] == "qtl" | loc.attributes[l] == "qtl.slope" | loc.attributes[l] == "qtl.adj" | loc.attributes[l] == "qtl.hed" | loc.attributes[l] == "qtl.epi") {
+                        mut.ind <- lapply(mut.ind, mutate.inf.alleles, l = l, sigma.a = sigma.a) } else {
+                            mut.ind <- lapply(mut.ind, mutate.K.alleles, l = l, alleles = alleles) }
+                }
+                ind.mat[mutations[[l]] == 1] <- mut.ind #Store results
+            }
+        }
+    ########################    
+        
+        
+    } #Done looping over generations
+
+    #Modify results matrices if necessary
+
+    #Return results
+    return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes, "linkagemap" = linkage))
+    
+}
+################################################################################################
+###                      End of plasticity simulations with starting genotypes               ###
+################################################################################################
+
 
 
 #############################################
