@@ -3,6 +3,7 @@
 export(coloured.noise)
 export(f.noise)
 export(het.calc)
+export(indsim.plasticity.startgenot.simulate)
 export(indsim.plasticity2.simulate)
 export(indsim.simulate)
 export(plot_allele.results)
