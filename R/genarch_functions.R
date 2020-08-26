@@ -949,6 +949,7 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
         nloc.chr <- rep(perlocus, n.chr)
         nloc.chr[1] <- nloc.chr[1] + (nqtl+nqtl.slope+nqtl.adj+nqtl.hed+nqtl.epi)%%n.chr #Add remainder to chr 1
         sigma.a <- runif(1, min = 0.01, max = 2)
+        
         ################################################################
     }
     
@@ -1294,7 +1295,8 @@ indsim.plasticity.startgenot.simulate <- function(N, generations, L, sel.intensi
         temp[qtl.ind] <- ae
         ae <- temp }
 
-    
+    #Get the current N
+    N <- length(ind.mat)
 
     #Simulation with logistic population regulation and natural selection
 
