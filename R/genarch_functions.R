@@ -384,7 +384,7 @@ produce.gametes <- function(sel.mat, loc.mat, N) {
 ####################################################################
 
 #Helper function, pick parents
-my.sample.parents <- function(x, Nind, No, ind.W) { c(x, sample((1:Nind)[-x], size = No[x], prob = ind.W[-x])) }
+my.sample.parents <- function(x, Nind, No, ind.W) { c(x, sample((1:Nind)[-x], size = No[x], replace = T, prob = ind.W[-x])) }
 
 
 
@@ -951,6 +951,24 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
         sigma.a <- runif(1, min = 0.01, max = 2)
         
         ################################################################
+
+        ##### Inserting some debug stuff ##################################################
+        #debugID <- sample(1:30000, 1)
+        #debugID <- paste("sensdebug", debugID, sep = "")
+
+        #system(paste("echo 'Parameters in this simulation were:' >> ", debugID, ".txt", sep = ""))
+        #system(paste("echo 'sigma.e\t", sigma.e, "'", " >> ", debugID, ".txt", sep = ""))
+        #system(paste("echo 'mu\t", mu, "'", " >> ", debugID, ".txt", sep = ""))
+        #system(paste("echo 'n.chr\t", n.chr, "'", " >> ", debugID, ".txt", sep = ""))
+        #system(paste("echo 'nqtl\t", nqtl, "'", " >> ", debugID, ".txt", sep = ""))
+        #system(paste("echo 'nqtl.slope\t", nqtl.slope, "'", " >> ", debugID, ".txt", sep = ""))
+        #system(paste("echo 'nqtl.adj\t", nqtl.adj, "'", " >> ", debugID, ".txt", sep = ""))
+        #system(paste("echo 'nqtl.hed\t", nqtl.hed, "'", " >> ", debugID, ".txt", sep = ""))
+        #system(paste("echo 'nqtl.epi\t", nqtl.epi, "'", " >> ", debugID, ".txt", sep = ""))
+        #system(paste("echo 'nloc.chr\t", paste(nloc.chr, collapse = " "), "'", " >> ", debugID, ".txt", sep = ""))
+        #system(paste("echo 'sigma.a\t", sigma.a, "'", " >> ", debugID, ".txt", sep = ""))
+        #####################################################################################
+        
     }
     
     
@@ -1126,6 +1144,8 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
         if(density.reg == "sugar") {
             #Calculate the number of offspring that each individual produces
             No <- rpois(n = N, lambda = B*ind.W)
+            #Check if there are more than 1 offspring, otherwise pop. goes extinct
+            if(sum(No) < 2) { return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes, "linkagemap" = linkage)) }
             #If number of offspring larger than K, remove some offspring randomly
             if(sum(No) > K) {
                 while(sum(No) > K) { #Remove individuals until only K are left
@@ -1171,6 +1191,12 @@ indsim.plasticity2.simulate <- function(N, generations, L, sel.intensity, init.f
     } #Done looping over generations
 
     #Modify results matrices if necessary
+
+    ### Sensitivity debug ###
+    #if(sensitivity == TRUE) {
+    #    system(paste("echo 'Simulation OK'", " >> ", debugID, ".txt", sep = ""))
+    #}
+    ########################
 
     #Return results
     return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes, "linkagemap" = linkage))
