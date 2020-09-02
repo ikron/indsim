@@ -383,8 +383,12 @@ produce.gametes <- function(sel.mat, loc.mat, N) {
 }
 ####################################################################
 
+
+##Note the function 'sample' has some undesired behaviour, when x is numeric and length(x) = 1, then function actually samples from 1:x .... WHY R WHY!!!!?
+##Use a safer version of the function to avoid this problem
+resample <- function(x, ...) x[sample.int(length(x), ...)] ##Safer version of sample function
 #Helper function, pick parents
-my.sample.parents <- function(x, Nind, No, ind.W) { c(x, sample((1:Nind)[-x], size = No[x], replace = T, prob = ind.W[-x])) }
+my.sample.parents <- function(x, Nind, No, ind.W) { c(x, resample((1:Nind)[-x], size = No[x], replace = T, prob = ind.W[-x])) }
 
 
 
