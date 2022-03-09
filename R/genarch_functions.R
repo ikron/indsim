@@ -636,6 +636,24 @@ load.loc.attributes <- function(file) {
 
     return(list("loci" = loc.attributes, "n.chr" = n.chr, "nloc.chr" = nloc.chr, "linkage" = linkage))
 }
+
+###Functions to calculate epistatic effects
+check.interaction <- function(x, genot) {
+    check <- apply(genot[,x], 2, function(x) {x != 0})
+    dose <- apply(check, 2, sum)
+    if(any(dose == 0)) {epistat.g <- 0} else {
+        if(sum(dose) == 4) {epistat.g <- 2 }
+        if(sum(dose) < 4) {epistat.g <- 1 }
+    }
+    return(epistat.g)
+}
+
+calc.epistat.effects <- function(genot) {
+#Check all interactions for a single genotype
+epistat.g <- apply(interactions, 1, check.interaction, genot = genot)
+return(sum(epistat.g*epi.effects))
+}
+##################################################
     
 
 #The string #' indicates roxygen parsing
@@ -672,7 +690,7 @@ load.loc.attributes <- function(file) {
 #' @param save.all whether genotypes should be saved in each generation?
 #' @param parname name of the parameter set used in saving the genotype files
 #' @export
-indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, density.reg, allele.model, mu.qtl, mu.delres = 0, mu.neutral = 0, sigma.a = 1, n.chr, nloc.chr, nqtl, n.delres = 0, n.neutral = 0, delres.h = 0.25, linkage.map = "random", linkage = NULL, save.all = FALSE, parname = NULL) {
+indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, sigma.e, K, r, B, opt.pheno, density.reg, allele.model, mu.qtl, mu.delres = 0, mu.neutral = 0, sigma.a = 1, n.chr, nloc.chr, nqtl, n.delres = 0, n.neutral = 0, delres.h = 0.25, linkage.map = "random", epistasis = FALSE, Eprob = 0, Emean = 0, sigma.epi = 1, linkage = NULL, save.all = FALSE, parname = NULL) {
 
     #Prepare linkage groups
     foo <- list(0)
@@ -711,6 +729,18 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
             linkage[[i]][3,] <- sort(runif(nloc.chr[i])) #Map-positions for each locus
         }
     }
+
+    ##Setup epistatic interactions if they exist in the simulation
+    if(epistasis = TRUE) {
+        #probability of epistasis = Eprob
+        #choose among all of the possible combinations those mutations that are going to have an interaction
+        n.comb <- choose(nqtl, 2) #Number of combinations
+        loc.comb <- t(combn(nloc, 2)) #Generate all combinations and transpose
+        n.epistat <- rbinom(1, n.comb, Eprob) #Number of interactions
+        interactions <- loc.comb[sample(1:n.comb, size = n.epistat, replace = FALSE),]
+        #interactions <- matrix(sample(1:nloc, size = 2*n.epistat), ncol = 2) #matrix of interacting loci
+        epi.effects <- rnorm(n.epistat, mean = Emean, sd = sigma.epi)
+    } #Done generating epistatic interactions
 
     #Simulation with logistic population regulation and natural selection
 
@@ -780,10 +810,15 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
             save.genotypes(ind.mat, nloci = nloc, parname = parname, generation = g, ID = ID)
         }
 
+
         #Argument type needs to have value of either "biallelic" or "infinite"
         ind.G <- calc.genot.effects(ind.mat, ae, type = allele.model, qtl.ind, nloc) #Calculate genotype effects
         #sigma.e <- (abs(ind.G) + 1)*coef.e #Environmental variation scales with genotypic effects
-        
+        if(epistasis = TRUE) {
+            EPI <- as.numeric(unlist(lapply(ind.mat, calc.epistat.effects)))
+            ind.G <- ind.G + EPI #Sum genotypic and epistatic effects, EPI part of genotype
+        }
+
         
         #Calculate environmental and phenotypic effects
         ind.E <- rnorm(n = N, mean = 0, sd = sigma.e)
