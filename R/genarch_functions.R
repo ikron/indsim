@@ -731,7 +731,7 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
     }
 
     ##Setup epistatic interactions if they exist in the simulation
-    if(epistasis = TRUE) {
+    if(epistasis == TRUE) {
         #probability of epistasis = Eprob
         #choose among all of the possible combinations those mutations that are going to have an interaction
         n.comb <- choose(nqtl, 2) #Number of combinations
@@ -814,7 +814,7 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
         #Argument type needs to have value of either "biallelic" or "infinite"
         ind.G <- calc.genot.effects(ind.mat, ae, type = allele.model, qtl.ind, nloc) #Calculate genotype effects
         #sigma.e <- (abs(ind.G) + 1)*coef.e #Environmental variation scales with genotypic effects
-        if(epistasis = TRUE) {
+        if(epistasis == TRUE) {
             EPI <- as.numeric(unlist(lapply(ind.mat, calc.epistat.effects)))
             ind.G <- ind.G + EPI #Sum genotypic and epistatic effects, EPI part of genotype
         }
