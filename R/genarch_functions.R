@@ -648,7 +648,7 @@ check.interaction <- function(x, genot) {
     return(epistat.g)
 }
 
-calc.epistat.effects <- function(genot, interactions) {
+calc.epistat.effects <- function(genot, interactions, epi.effects) {
 #Check all interactions for a single genotype
 epistat.g <- apply(interactions, 1, check.interaction, genot = genot)
 return(sum(epistat.g*epi.effects))
@@ -819,7 +819,7 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
         ind.G <- calc.genot.effects(ind.mat, ae, type = allele.model, qtl.ind, nloc) #Calculate genotype effects
         #sigma.e <- (abs(ind.G) + 1)*coef.e #Environmental variation scales with genotypic effects
         if(epistasis == TRUE) {
-            EPI <- as.numeric(unlist(lapply(ind.mat, calc.epistat.effects, interactions = interactions)))
+            EPI <- as.numeric(unlist(lapply(ind.mat, calc.epistat.effects, interactions = interactions, epi.effects = epi.effects)))
             ind.G <- ind.G + EPI #Sum genotypic and epistatic effects, EPI part of genotype
         }
 
