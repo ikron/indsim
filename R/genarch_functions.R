@@ -804,7 +804,7 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
     for(g in 1:generations) {
 
         #Check for extinction
-        if(N < 2) {stop("Population went extinct! : (")}
+        if(N < 2) {return(list("phenotype" = results.mat.pheno, "alleles" = results.mat.alleles, "genotypes" = ind.mat, "loci" = loc.attributes, "linkagemap" = linkage))}
 
         #Calculate allele frequencies
         results.mat.alleles[g,2:(nloc+1)] <- calc.al.freq(ind.mat, length(ind.mat), nloc, allele.model, loc.attributes)
