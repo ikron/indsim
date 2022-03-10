@@ -648,7 +648,7 @@ check.interaction <- function(x, genot) {
     return(epistat.g)
 }
 
-calc.epistat.effects <- function(genot) {
+calc.epistat.effects <- function(genot, interactions) {
 #Check all interactions for a single genotype
 epistat.g <- apply(interactions, 1, check.interaction, genot = genot)
 return(sum(epistat.g*epi.effects))
@@ -687,6 +687,10 @@ return(sum(epistat.g*epi.effects))
 #' @param delres.h Dominance coefficient of deleterious mutations
 #' @param linkage.map If map distances are determined randomly, set this to "random", if fixed linkage map is provided can set this to "user"
 #' @param linkage Matrix of 3 rows and nloc columns, first two rows can be zeros and third row determines map distances relative to chromosome coordinates from 0 to 1
+#' @param epistasis Whether epistasis is present in the simulation
+#' @param Eprob Probability that two loci exhibit epistasis
+#' @param Emean Mean of epistasis coefficients
+#' @param sigma.epi Standard deviation of epistasis coefficients
 #' @param save.all whether genotypes should be saved in each generation?
 #' @param parname name of the parameter set used in saving the genotype files
 #' @export
@@ -815,7 +819,7 @@ indsim.simulate <- function(N, generations, sel.intensity, init.f, init.n, a, si
         ind.G <- calc.genot.effects(ind.mat, ae, type = allele.model, qtl.ind, nloc) #Calculate genotype effects
         #sigma.e <- (abs(ind.G) + 1)*coef.e #Environmental variation scales with genotypic effects
         if(epistasis == TRUE) {
-            EPI <- as.numeric(unlist(lapply(ind.mat, calc.epistat.effects)))
+            EPI <- as.numeric(unlist(lapply(ind.mat, calc.epistat.effects, interactions = interactions)))
             ind.G <- ind.G + EPI #Sum genotypic and epistatic effects, EPI part of genotype
         }
 
